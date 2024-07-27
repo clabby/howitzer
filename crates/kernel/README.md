@@ -1,6 +1,6 @@
-# `howitzer`
+# `howitzer-kernel`
 
-The `howitzer` crate provides a high-level interface to run the howitzer kernel, which consists of the [MIPS32 emulator][fpvm]
+The `howitzer-kernel` crate provides a high-level interface to run the howitzer FPVM, which consists of the [MIPS32 emulator][fpvm]
 as well as the [preimage oracle server][preimage-oracle].
 
 The interaction between these two processes is fully synchronous. While the emulator is running, the preimage oracle
