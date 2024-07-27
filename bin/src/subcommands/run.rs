@@ -1,11 +1,11 @@
-//! The `run` subcommand for the cannon binary
+//! The `run` subcommand for the howitzer binary
 
-use super::CannonSubcommandDispatcher;
+use super::HowitzerSubcommandDispatcher;
 use anyhow::Result;
-use cannon::KernelBuilder;
+use howitzer_kernel::KernelBuilder;
 use clap::Args;
 
-/// Command line arguments for `cannon run`
+/// Command line arguments for `howitzer run`
 #[derive(Args, Debug)]
 #[command(author, version, about)]
 pub(crate) struct RunArgs {
@@ -47,7 +47,7 @@ pub(crate) struct RunArgs {
     info_at: Option<String>,
 }
 
-impl CannonSubcommandDispatcher for RunArgs {
+impl HowitzerSubcommandDispatcher for RunArgs {
     fn dispatch(self) -> Result<()> {
         let kernel = KernelBuilder::default()
             .with_preimage_server(self.preimage_server.replace('"', ""))

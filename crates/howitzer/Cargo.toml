@@ -1,0 +1,30 @@
+[package]
+name = "howitzer-kernel"
+description = "High-level API for the Howitzer kernel"
+edition = "2021"
+
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+# workspace
+alloy-primitives.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+kona-preimage.workspace = true
+kona-common.workspace = true
+tracing.workspace = true
+
+# local
+howitzer-fpvm = { path = "../fpvm" }
+
+# misc external
+tempfile = "3.10"
+async-trait = "0.1.81"
+flate2 = "1.0.28"
+command-fds = "0.2.3"
+
+[dev-dependencies]
+proptest = "1.4.0"

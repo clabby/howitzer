@@ -3,8 +3,8 @@
 # Grab the directory of this script.
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-echo "Building binary..."
-cargo build --release --bin cannon
+echo "Building binary (default features)..."
+cargo build --release --bin howitzer
 
 # Check if `docker` is installed
 if ! command -v docker &> /dev/null
@@ -14,4 +14,4 @@ then
 fi
 
 echo "Building image..."
-docker build -f cannon-rs.dockerfile $DIR/.. -t cannon-rs
+docker build -f howitzer.dockerfile "$DIR/.." -t howitzer:latest

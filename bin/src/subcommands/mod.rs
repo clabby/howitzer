@@ -1,4 +1,4 @@
-//! Subcommands for the `cannon` binary
+//! Subcommands for the `howitzer` binary
 
 use anyhow::Result;
 use clap::Subcommand;
@@ -7,25 +7,25 @@ mod load_elf;
 mod run;
 mod witness;
 
-pub(crate) trait CannonSubcommandDispatcher {
+pub(crate) trait HowitzerSubcommandDispatcher {
     /// Dispatches the subcommand
     fn dispatch(self) -> Result<()>;
 }
 
-/// The subcommands for the `cannon` binary
+/// The subcommands for the `howitzer` binary
 #[derive(Subcommand, Debug)]
-pub(crate) enum CannonSubcommand {
+pub(crate) enum HowitzerSubcommand {
     Run(run::RunArgs),
     Witness(witness::WitnessArgs),
     LoadElf(load_elf::LoadElfArgs),
 }
 
-impl CannonSubcommandDispatcher for CannonSubcommand {
+impl HowitzerSubcommandDispatcher for HowitzerSubcommand {
     fn dispatch(self) -> Result<()> {
         match self {
-            CannonSubcommand::Run(args) => args.dispatch(),
-            CannonSubcommand::Witness(args) => args.dispatch(),
-            CannonSubcommand::LoadElf(args) => args.dispatch(),
+            HowitzerSubcommand::Run(args) => args.dispatch(),
+            HowitzerSubcommand::Witness(args) => args.dispatch(),
+            HowitzerSubcommand::LoadElf(args) => args.dispatch(),
         }
     }
 }

@@ -1,25 +1,27 @@
 [package]
-name = "cannon-rs"
-description = "Binary crate for cannon-rs"
+name = "howitzer"
+description = "Binary crate for the Howitzer Fault Proof VM"
 edition = "2021"
 
 version.workspace = true
 authors.workspace = true
 
 [dependencies]
+# workspace
+anyhow.workspace = true
+alloy-primitives.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
 # External
-anyhow = "1.0.75"
-clap = { version = "4.4.3", features = ["derive"] }
-alloy-primitives = "0.4.0"
+clap = { version = "4.5.9", features = ["derive"] }
 tracing = "0.1.37"
 tracing-subscriber = "0.3.17"
-serde = { version = "1.0.188", features = ["derive"] }
-serde_json = "1.0.107"
 
 # Local
-cannon = { path = "../crates/cannon" }
-cannon-mipsevm = { path = "../crates/mipsevm" }
+howitzer-kernel = { path = "../crates/howitzer" }
+howitzer-fpvm = { path = "../crates/fpvm" }
 
 [[bin]]
-name = "cannon"
-path = "src/cannon.rs"
+name = "howitzer"
+path = "src/howitzer.rs"

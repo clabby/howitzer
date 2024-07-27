@@ -1,6 +1,6 @@
-# `cannon-rs` Docker Image
+# `howitzer` Docker Image
 
-This folder contains a Dockerfile that includes the `cannon-rs` release binary.
+This folder contains a Dockerfile that includes the `howitzer` release binary.
 
 ## Building
 
