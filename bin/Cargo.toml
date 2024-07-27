@@ -19,7 +19,7 @@ tracing = "0.1.37"
 tracing-subscriber = "0.3.17"
 
 # Local
-howitzer-kernel = { path = "../crates/howitzer" }
+howitzer-kernel = { path = "../crates/kernel" }
 howitzer-fpvm = { path = "../crates/fpvm" }
 
 [[bin]]
