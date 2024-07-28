@@ -309,7 +309,7 @@ where
     /// - `mem`: The memory that the instruction is operating on.
     ///
     /// ### Returns
-    /// - `Ok(n)` - The result of the instruction execution.
+    /// - `Ok((rd_idx, Option<store_address>, value))` - The result of the instruction execution.
     /// - `Err(_)`: An error occurred while executing the instruction.
     #[inline(always)]
     pub(crate) fn execute_i_type(
@@ -451,7 +451,6 @@ where
                     v0 = 1;
                 }
                 Syscall::ExitGroup => {
-                    dbg!("Syscall: {syscall}");
                     self.state.exited = true;
                     self.state.exit_code = a0 as u8;
                     return Ok(());
@@ -626,17 +625,17 @@ where
                     || (rs != rt && matches!(opcode, Opcode::BNE))
             }
             // blez
-            Opcode::BLEZ => (rs as i32) <= 0,
+            Opcode::BLEZ => (rs as i64) <= 0,
             // bgtz
-            Opcode::BGTZ => (rs as i32) > 0,
+            Opcode::BGTZ => (rs as i64) > 0,
             Opcode::REGIMM => {
                 // regimm
                 if instruction.rt == 0 {
                     // bltz
-                    (rs as i32) < 0
+                    (rs as i64) < 0
                 } else if instruction.rt == 1 {
                     // bgez
-                    (rs as i32) >= 0
+                    (rs as i64) >= 0
                 } else {
                     false
                 }

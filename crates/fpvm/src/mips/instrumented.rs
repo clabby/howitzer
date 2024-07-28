@@ -118,11 +118,15 @@ where
 #[cfg(test)]
 mod test {
     use alloy_primitives::keccak256;
+    use elf::{endian::AnyEndian, ElfBytes};
 
     use crate::{
         test_utils::{ClaimTestOracle, StaticOracle, BASE_ADDR_END, END_ADDR},
         types::{state_hash, Address, State, STATE_WITNESS_SIZE},
-        utils::patch::{load_elf, patch_go, patch_stack},
+        utils::{
+            meta::Meta,
+            patch::{load_elf, patch_go, patch_stack},
+        },
         InstrumentedState,
     };
     use std::{
@@ -230,12 +234,22 @@ mod test {
         patch_go(elf_bytes, &mut state).unwrap();
         patch_stack(&mut state).unwrap();
 
+        let metadata =
+            Meta::from_elf(ElfBytes::<AnyEndian>::minimal_parse(elf_bytes).unwrap()).unwrap();
+
         let out = BufWriter::new(Vec::default());
         let err = BufWriter::new(Vec::default());
         let mut ins =
             InstrumentedState::new(state, StaticOracle::new(b"hello world".to_vec()), out, err);
 
+        let mut last_symbol = None;
         for _ in 0..400_000 {
+            let symbol = metadata.lookup(ins.state.pc);
+            if last_symbol.unwrap_or_default() != symbol {
+                println!("pc: 0x{:x} symbol name: {}", ins.state.pc, symbol);
+            }
+            last_symbol = Some(symbol);
+
             if ins.state.exited {
                 break;
             }
