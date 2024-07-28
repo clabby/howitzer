@@ -280,7 +280,8 @@ impl Memory {
     }
 
     /// Set a 64 bit value in the [Memory] at a given address.
-    /// This will invalidate the page at the given address, or allocate a new page if it does not exist.
+    /// This will invalidate the page at the given address, or allocate a new page if it does not
+    /// exist.
     ///
     /// ### Takes
     /// - `address`: The address to set the value at.

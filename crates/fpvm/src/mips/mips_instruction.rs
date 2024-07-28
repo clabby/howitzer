@@ -46,7 +46,7 @@ pub enum Opcode {
     DADDIU = 0x19,
     LWU = 0x27,
     LD = 0x37,
-    SD = 0x3F
+    SD = 0x3F,
 }
 
 impl TryFrom<u32> for Opcode {
@@ -150,7 +150,7 @@ pub enum SpecialFunction {
     DSRA = 0x3B,
     DSLL32 = 0x3C,
     DSRL32 = 0x3E,
-    DSRA32 = 0x3F
+    DSRA32 = 0x3F,
 }
 
 impl TryFrom<u32> for SpecialFunction {

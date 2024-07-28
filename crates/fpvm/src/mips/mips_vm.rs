@@ -73,15 +73,15 @@ where
         // Handle ALU immediate instructions
         if matches!(
             opcode,
-            Opcode::ADDI
-                | Opcode::ADDIU
-                | Opcode::SLTI
-                | Opcode::SLTIU
-                | Opcode::ANDI
-                | Opcode::ORI
-                | Opcode::XORI
-                | Opcode::DADDI
-                | Opcode::DADDIU
+            Opcode::ADDI |
+                Opcode::ADDIU |
+                Opcode::SLTI |
+                Opcode::SLTIU |
+                Opcode::ANDI |
+                Opcode::ORI |
+                Opcode::XORI |
+                Opcode::DADDI |
+                Opcode::DADDIU
         ) {
             let i_type = IType::decode(instruction)?;
 
@@ -170,14 +170,14 @@ where
                         // no-op
                         Some(rs_val)
                     }
-                    SpecialFunction::MFHI
-                    | SpecialFunction::MTHI
-                    | SpecialFunction::MFLO
-                    | SpecialFunction::MTLO
-                    | SpecialFunction::MULT
-                    | SpecialFunction::MULTU
-                    | SpecialFunction::DIV
-                    | SpecialFunction::DIVU => {
+                    SpecialFunction::MFHI |
+                    SpecialFunction::MTHI |
+                    SpecialFunction::MFLO |
+                    SpecialFunction::MTLO |
+                    SpecialFunction::MULT |
+                    SpecialFunction::MULTU |
+                    SpecialFunction::DIV |
+                    SpecialFunction::DIVU => {
                         self.handle_hi_lo(funct, rs_val, rt_val, instruction.rd as usize)?;
                         None
                     }
@@ -216,7 +216,10 @@ where
                     SpecialFunction::DSLLV => Some(rt_val << rs_val),
                     SpecialFunction::DSRLV => Some(rt_val >> rs_val),
                     SpecialFunction::DMULTU | SpecialFunction::DDIVU => {
-                        println!("rs: {:05b} | rd {} | shamt: {}", instruction.rs, instruction.rt, instruction.shamt);
+                        println!(
+                            "rs: {:05b} | rd {} | shamt: {}",
+                            instruction.rs, instruction.rt, instruction.shamt
+                        );
                         self.handle_hi_lo(funct, rs_val, rt_val, instruction.rd as usize)?;
                         None
                     }
@@ -233,7 +236,9 @@ where
                     SpecialFunction::DSLL => Some(rt_val << instruction.shamt),
                     SpecialFunction::DSLL32 => Some(rt_val << (instruction.shamt + 32)),
                     SpecialFunction::DSRL32 => Some(rt_val >> (instruction.shamt + 32)),
-                    SpecialFunction::DSRA32 => Some(((rt_val as i64) >> (instruction.shamt + 32)) as u64),
+                    SpecialFunction::DSRA32 => {
+                        Some(((rt_val as i64) >> (instruction.shamt + 32)) as u64)
+                    }
                 }
             }
             Opcode::SPECIAL2 => {
@@ -403,9 +408,7 @@ where
                 (mem >> (32 - ((rs_val & 0x4) << 3))) & 0xFFFFFFFF,
             )),
             Opcode::LD => Ok((instruction.rt as usize, None, mem)),
-            Opcode::SD => {
-                Ok((0, Some(address), rt_val))
-            }
+            Opcode::SD => Ok((0, Some(address), rt_val)),
             _ => anyhow::bail!("Invalid opcode {:?}", opcode),
         }
     }
@@ -620,8 +623,8 @@ where
         let should_branch = match opcode {
             Opcode::BEQ | Opcode::BNE => {
                 let rt = self.state.registers[instruction.rt as usize];
-                (rs == rt && matches!(opcode, Opcode::BEQ))
-                    || (rs != rt && matches!(opcode, Opcode::BNE))
+                (rs == rt && matches!(opcode, Opcode::BEQ)) ||
+                    (rs != rt && matches!(opcode, Opcode::BNE))
             }
             // blez
             Opcode::BLEZ => (rs as i32) <= 0,

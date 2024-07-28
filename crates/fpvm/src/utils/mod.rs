@@ -21,7 +21,10 @@ pub(crate) fn keccak_concat_hashes(a: B256, b: B256) -> B256 {
     #[cfg(feature = "simd-keccak")]
     {
         let mut out = B256::ZERO;
-        keccak256_aarch64_simd::simd_keccak256_64b_single(concat_fixed(a, b).as_slice(), out.as_mut());
+        keccak256_aarch64_simd::simd_keccak256_64b_single(
+            concat_fixed(a, b).as_slice(),
+            out.as_mut(),
+        );
         out
     }
 

@@ -25,8 +25,8 @@
 //
 // /// A wrapper around a [revm] interpreter with an in-memory backend that has the MIPS &
 // /// PreimageOracle smart contracts deployed at deterministic addresses. This is used for
-// /// differential testing the implementation of the MIPS VM in this crate against the smart contract
-// /// implementations.
+// /// differential testing the implementation of the MIPS VM in this crate against the smart
+// contract /// implementations.
 // pub struct MipsEVM<'a, DB: Database> {
 //     pub inner: Evm<'a, (), DB>,
 // }
@@ -85,9 +85,9 @@
 //             anyhow::bail!("Failed to deploy PreimageOracle contract");
 //         };
 //
-//         // Deploy the MIPS contract prior to deploying it manually. This contract has an immutable
-//         // variable, so we let the creation code fill this in for us, and then deploy it to the
-//         // test address.
+//         // Deploy the MIPS contract prior to deploying it manually. This contract has an
+// immutable         // variable, so we let the creation code fill this in for us, and then deploy
+// it to the         // test address.
 //         let encoded_preimage_addr =
 //             Address::from_slice(PREIMAGE_ORACLE_ADDR.as_slice()).into_word();
 //         let mips_creation_heap = hex::decode(MIPS_CREATION_CODE)?
@@ -135,8 +135,8 @@
 //             let preimage_oracle_input = witness
 //                 .encode_preimage_oracle_input()
 //                 .ok_or(anyhow::anyhow!("Failed to ABI encode preimage oracle input."))?;
-//             self.fill_tx_env(TransactTo::Call(PREIMAGE_ORACLE_ADDR.into()), preimage_oracle_input);
-//             self.inner.transact_commit().map_err(|_| {
+//             self.fill_tx_env(TransactTo::Call(PREIMAGE_ORACLE_ADDR.into()),
+// preimage_oracle_input);             self.inner.transact_commit().map_err(|_| {
 //                 anyhow::anyhow!("Failed to commit preimage to PreimageOracle contract")
 //             })?;
 //         }
@@ -159,7 +159,8 @@
 //         {
 //             let output = B256::from_slice(&output);
 //
-//             tracing::debug!(target: "mipsevm::evm", "EVM step successful with resulting post-state hash: {:x}", output);
+//             tracing::debug!(target: "mipsevm::evm", "EVM step successful with resulting
+// post-state hash: {:x}", output);
 //
 //             if logs.len() != 1 {
 //                 anyhow::bail!("Expected 1 log, got {}", logs.len());
@@ -280,8 +281,8 @@
 //                 }
 //
 //                 let instruction =
-//                     instrumented.state.memory.get_memory(instrumented.state.pc as Address).unwrap();
-//                 println!(
+//                     instrumented.state.memory.get_memory(instrumented.state.pc as
+// Address).unwrap();                 println!(
 //                     "step: {} pc: 0x{:08x} insn: 0x{:08x}",
 //                     instrumented.state.step, instrumented.state.pc, instruction
 //                 );
@@ -410,8 +411,8 @@
 //
 //             if i % 1000 == 0 {
 //                 let instruction =
-//                     instrumented.state.memory.get_memory(instrumented.state.pc as Address).unwrap();
-//                 println!(
+//                     instrumented.state.memory.get_memory(instrumented.state.pc as
+// Address).unwrap();                 println!(
 //                     "step: {} pc: 0x{:08x} instruction: {:08x}",
 //                     instrumented.state.step, instrumented.state.pc, instruction
 //                 );
@@ -451,8 +452,8 @@
 //
 //             if i % 1000 == 0 {
 //                 let instruction =
-//                     instrumented.state.memory.get_memory(instrumented.state.pc as Address).unwrap();
-//                 println!(
+//                     instrumented.state.memory.get_memory(instrumented.state.pc as
+// Address).unwrap();                 println!(
 //                     "step: {} pc: 0x{:08x} instruction: {:08x}",
 //                     instrumented.state.step, instrumented.state.pc, instruction
 //                 );
@@ -478,6 +479,6 @@
 //                 ClaimTestOracle::S * ClaimTestOracle::A + ClaimTestOracle::B
 //             )
 //         );
-//         assert_eq!(String::from_utf8(instrumented.std_err.buffer().to_vec()).unwrap(), "started!");
-//     }
+//         assert_eq!(String::from_utf8(instrumented.std_err.buffer().to_vec()).unwrap(),
+// "started!");     }
 // }

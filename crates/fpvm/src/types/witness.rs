@@ -1,7 +1,9 @@
 //! This module contains the various witness types.
 
 use crate::{
-    memory::MEMORY_PROOF_SIZE, types::{State, StateWitness}, utils::keccak256
+    memory::MEMORY_PROOF_SIZE,
+    types::{State, StateWitness},
+    utils::keccak256,
 };
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_sol_types::{sol, SolCall};
