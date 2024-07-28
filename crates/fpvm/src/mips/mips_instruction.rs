@@ -134,7 +134,6 @@ pub enum SpecialFunction {
     NOR = 0x27,
     SLTI = 0x2A,
     SLTIU = 0x2B,
-    TEQ = 0x34,
 
     // MIPS64
     DSLLV = 0x14,
@@ -189,7 +188,6 @@ impl TryFrom<u32> for SpecialFunction {
             0x27 => Ok(SpecialFunction::NOR),
             0x2A => Ok(SpecialFunction::SLTI),
             0x2B => Ok(SpecialFunction::SLTIU),
-            0x34 => Ok(SpecialFunction::TEQ),
 
             // MIPS64
             0x14 => Ok(SpecialFunction::DSLLV),

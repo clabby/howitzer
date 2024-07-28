@@ -38,6 +38,11 @@ where
         let instruction = self.state.memory.get_memory_word(self.state.pc as Address)?;
         let opcode = Opcode::try_from(instruction >> 26)?;
 
+        // println!(
+        //     "Step: {}, Opcode: {:?} | Instruction: {:04x}",
+        //     self.state.step, opcode, instruction
+        // );
+
         // Handle J-type - J/JAL
         if matches!(opcode, Opcode::J | Opcode::JAL) {
             // J has no link register, only JAL.
@@ -73,15 +78,15 @@ where
         // Handle ALU immediate instructions
         if matches!(
             opcode,
-            Opcode::ADDI |
-                Opcode::ADDIU |
-                Opcode::SLTI |
-                Opcode::SLTIU |
-                Opcode::ANDI |
-                Opcode::ORI |
-                Opcode::XORI |
-                Opcode::DADDI |
-                Opcode::DADDIU
+            Opcode::ADDI
+                | Opcode::ADDIU
+                | Opcode::SLTI
+                | Opcode::SLTIU
+                | Opcode::ANDI
+                | Opcode::ORI
+                | Opcode::XORI
+                | Opcode::DADDI
+                | Opcode::DADDIU
         ) {
             let i_type = IType::decode(instruction)?;
 
@@ -170,14 +175,14 @@ where
                         // no-op
                         Some(rs_val)
                     }
-                    SpecialFunction::MFHI |
-                    SpecialFunction::MTHI |
-                    SpecialFunction::MFLO |
-                    SpecialFunction::MTLO |
-                    SpecialFunction::MULT |
-                    SpecialFunction::MULTU |
-                    SpecialFunction::DIV |
-                    SpecialFunction::DIVU => {
+                    SpecialFunction::MFHI
+                    | SpecialFunction::MTHI
+                    | SpecialFunction::MFLO
+                    | SpecialFunction::MTLO
+                    | SpecialFunction::MULT
+                    | SpecialFunction::MULTU
+                    | SpecialFunction::DIV
+                    | SpecialFunction::DIVU => {
                         self.handle_hi_lo(funct, rs_val, rt_val, instruction.rd as usize)?;
                         None
                     }
@@ -205,32 +210,26 @@ where
                     SpecialFunction::SLTIU => {
                         Some(((rs_val as u32) < (rt_val as u32)) as DoubleWord)
                     }
-                    SpecialFunction::TEQ => {
-                        if (rs_val as u32) == (rt_val as u32) {
-                            anyhow::bail!("TEQ: rs [{rs_val}] == rt [{rt_val}]");
-                        }
-                        Some(rs_val)
-                    }
 
                     // MIPS64
                     SpecialFunction::DSLLV => Some(rt_val << rs_val),
                     SpecialFunction::DSRLV => Some(rt_val >> rs_val),
                     SpecialFunction::DMULTU | SpecialFunction::DDIVU => {
-                        println!(
-                            "rs: {:05b} | rd {} | shamt: {}",
-                            instruction.rs, instruction.rt, instruction.shamt
-                        );
                         self.handle_hi_lo(funct, rs_val, rt_val, instruction.rd as usize)?;
                         None
                     }
                     SpecialFunction::DADD => {
+                        // TODO: Trap on overflow
                         Some(self.execute_immediate_alu(Opcode::DADDI, rs_val, rt_val)?)
                     }
                     SpecialFunction::DADDU => {
                         Some(self.execute_immediate_alu(Opcode::DADDI, rs_val, rt_val)?)
                     }
-                    SpecialFunction::DSUB => Some(rs_val.wrapping_sub(rt_val)),
-                    SpecialFunction::DSUBU => Some(rs_val.wrapping_sub(rt_val)),
+                    SpecialFunction::DSUB => {
+                        // TODO: Trap on underflow
+                        Some(rs_val - rt_val)
+                    }
+                    SpecialFunction::DSUBU => Some(rs_val - rt_val),
                     SpecialFunction::DSRL => Some(rt_val >> instruction.shamt),
                     SpecialFunction::DSRA => Some(((rt_val as i64) >> instruction.shamt) as u64),
                     SpecialFunction::DSLL => Some(rt_val << instruction.shamt),
@@ -623,8 +622,8 @@ where
         let should_branch = match opcode {
             Opcode::BEQ | Opcode::BNE => {
                 let rt = self.state.registers[instruction.rt as usize];
-                (rs == rt && matches!(opcode, Opcode::BEQ)) ||
-                    (rs != rt && matches!(opcode, Opcode::BNE))
+                (rs == rt && matches!(opcode, Opcode::BEQ))
+                    || (rs != rt && matches!(opcode, Opcode::BNE))
             }
             // blez
             Opcode::BLEZ => (rs as i32) <= 0,
@@ -713,29 +712,33 @@ where
             }
             SpecialFunction::DIV => {
                 // div
-                self.state.hi = sign_extend((rs as i32 % rt as i32) as u64, 32);
-                self.state.lo = sign_extend((rs as i32 / rt as i32) as u64, 32);
+                self.state.hi =
+                    sign_extend((rs as i32).checked_rem(rt as i32).unwrap_or_default() as u64, 32);
+                self.state.lo =
+                    sign_extend((rs as i32).checked_div(rt as i32).unwrap_or_default() as u64, 32);
                 0
             }
             SpecialFunction::DIVU => {
                 // divu
-                self.state.hi = sign_extend((rs as u32 % rt as u32) as u64, 32);
-                self.state.lo = sign_extend((rs as u32 / rt as u32) as u64, 32);
+                self.state.hi =
+                    sign_extend((rs as u32).checked_rem(rt as u32).unwrap_or_default() as u64, 32);
+                self.state.lo =
+                    sign_extend((rs as u32).checked_div(rt as u32).unwrap_or_default() as u64, 32);
                 0
             }
             // MIPS64
             SpecialFunction::DMULTU => {
                 // dmultu
-                let acc = (rs as u128).wrapping_mul(rt as u128); // Perform 64-bit unsigned multiplication
+                let acc = (rs as u128) * (rt as u128);
 
-                self.state.hi = (acc >> 64) as u64; // Upper 64 bits
-                self.state.lo = acc as u64; // Lower 64 bits
+                self.state.hi = (acc >> 64) as u64;
+                self.state.lo = acc as u64;
                 0
             }
             SpecialFunction::DDIVU => {
                 // ddivu
-                self.state.hi = rs % rt;
-                self.state.lo = rs / rt;
+                self.state.hi = rs.checked_rem(rt).unwrap_or_default();
+                self.state.lo = rs.checked_div(rt).unwrap_or_default();
                 0
             }
             _ => 0,
