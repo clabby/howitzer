@@ -1,5 +1,6 @@
 //! This module contains utilities for loading ELF files into [State] objects.
 
+use crate::utils::sign_extend;
 use crate::{
     memory::page,
     types::{Address, State},
@@ -23,8 +24,7 @@ pub(crate) const GO_SYMBOLS: [&str; 14] = [
     "github.com/prometheus/client_model/go.init.0",
     "github.com/prometheus/client_model/go.init.1",
     "flag.init", // skip flag pkg init, we need to debug arg-processing more to see why this fails
-    "runtime.check", /* We need to patch this out, we don't pass float64nan because we don't support
-                  * floats */
+    "runtime.check", // We need to patch this out, we don't pass float64nan because we don't support floats
 ];
 
 /// Load a raw ELF file into a [State] object.
@@ -39,13 +39,15 @@ pub fn load_elf(raw: &[u8]) -> Result<State> {
     let elf = ElfBytes::<AnyEndian>::minimal_parse(raw)?;
 
     let mut state = State {
-        pc: elf.ehdr.e_entry as u32,
-        next_pc: elf.ehdr.e_entry as u32 + 4,
-        heap: 0x05000000,
+        pc: elf.ehdr.e_entry,
+        next_pc: elf.ehdr.e_entry + 4,
+        heap: 0x20000000u64,
         ..Default::default()
     };
 
-    let headers = elf.segments().ok_or(anyhow::anyhow!("Failed to load section headers"))?;
+    let headers = elf
+        .segments()
+        .ok_or(anyhow::anyhow!("Failed to load section headers"))?;
 
     for (i, header) in headers.iter().enumerate() {
         if header.p_type == 0x70000003 {
@@ -80,9 +82,9 @@ pub fn load_elf(raw: &[u8]) -> Result<State> {
             }
         }
 
-        if header.p_vaddr + header.p_memsz >= 1 << 32 {
+        if header.p_vaddr + header.p_memsz >= 1 << 47 {
             anyhow::bail!(
-                "Program segment {} out of 32-bit mem range: {} - {} (size: {})",
+                "Program segment {} out of 64-bit mem range: {} - {} (size: {})",
                 i,
                 header.p_vaddr,
                 header.p_vaddr + header.p_memsz,
@@ -90,13 +92,13 @@ pub fn load_elf(raw: &[u8]) -> Result<State> {
             );
         }
 
-        state.memory.set_memory_range(header.p_vaddr as u32, reader)?;
+        state.memory.set_memory_range(header.p_vaddr, reader)?;
     }
 
     Ok(state)
 }
 
-/// Patch a Go ELF file to work with the Howitzer FPVM.
+/// Patch a Go ELF file to work with mipsevm.
 ///
 /// ### Takes
 /// - `elf`: The ELF file to patch
@@ -107,8 +109,9 @@ pub fn load_elf(raw: &[u8]) -> Result<State> {
 /// - `Err(_)` if the patch failed
 pub fn patch_go(raw: &[u8], state: &mut State) -> Result<()> {
     let elf = ElfBytes::<AnyEndian>::minimal_parse(raw)?;
-    let (parsing_table, string_table) =
-        elf.symbol_table()?.ok_or(anyhow::anyhow!("Failed to load ELF symbol table"))?;
+    let (parsing_table, string_table) = elf
+        .symbol_table()?
+        .ok_or(anyhow::anyhow!("Failed to load ELF symbol table"))?;
 
     for symbol in parsing_table {
         let symbol_idx = symbol.st_name;
@@ -119,12 +122,12 @@ pub fn patch_go(raw: &[u8], state: &mut State) -> Result<()> {
             // 03e00008 = jr $ra = ret (pseudo instruction)
             // 00000000 = nop (executes with delay-slot, but does nothing)
             state.memory.set_memory_range(
-                symbol.st_value as u32,
+                symbol.st_value,
                 [0x03, 0xe0, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00].as_slice(),
             )?;
         } else if name == "runtime.MemProfileRate" {
             // disable mem profiling, to avoid a lot of unnecessary floating point ops
-            state.memory.set_memory(symbol.st_value as u32, 0)?;
+            state.memory.set_memory_word(symbol.st_value, 0)?;
         }
     }
     Ok(())
@@ -140,39 +143,42 @@ pub fn patch_go(raw: &[u8], state: &mut State) -> Result<()> {
 /// - `Err(_)` if the patch failed
 pub fn patch_stack(state: &mut State) -> Result<()> {
     // Setup stack pointer
-    let ptr = 0x7F_FF_D0_00_u32;
+    let ptr = 0x7F_FF_FF_FF_D0_00_u64;
 
     // Allocate 1 page for the initial stack data, and 16KB = 4 pages for the stack to grow.
     state.memory.set_memory_range(
-        ptr - 4 * page::PAGE_SIZE as u32,
+        sign_extend(ptr - 4 * page::PAGE_SIZE as u64, 47),
         [0u8; page::PAGE_SIZE * 5].as_slice(),
     )?;
     state.registers[29] = ptr;
 
     #[inline(always)]
     fn store_mem(st: &mut State, address: Address, value: u32) -> Result<()> {
-        st.memory.set_memory(address, value)
+        st.memory.set_memory_word(address, value)
     }
 
     // init argc, argv, aux on stack
-    store_mem(state, ptr + 4, 0x42)?; // argc = 0 (argument count)
-    store_mem(state, ptr + 4 * 2, 0x35)?; // argv[n] = 0 (terminating argv)
-    store_mem(state, ptr + 4 * 3, 0)?; // envp[term] = 0 (no env vars)
-    store_mem(state, ptr + 4 * 4, 6)?; // auxv[0] = _AT_PAGESZ = 6 (key)
-    store_mem(state, ptr + 4 * 5, 4096)?; // auxv[1] = page size of 4 KiB (value) - (== minPhysPageSize)
-    store_mem(state, ptr + 4 * 6, 25)?; // auxv[2] = AT_RANDOM
-    store_mem(state, ptr + 4 * 7, ptr + 4 * 9)?; // auxv[3] = address of 16 bytes containing random value
-    store_mem(state, ptr + 4 * 8, 0)?; // auxv[term] = 0
+    store_mem(state, sign_extend(ptr + 4, 47), 0x42)?; // argc = 0 (argument count)
+    store_mem(state, sign_extend(ptr + 4 * 2, 47), 0x35)?; // argv[n] = 0 (terminating argv)
+    store_mem(state, sign_extend(ptr + 4 * 3, 47), 0)?; // envp[term] = 0 (no env vars)
+    store_mem(state, sign_extend(ptr + 4 * 4, 47), 6)?; // auxv[0] = _AT_PAGESZ = 6 (key)
+    store_mem(state, sign_extend(ptr + 4 * 5, 47), 4096)?; // auxv[1] = page size of 4 KiB (value) - (== minPhysPageSize)
+    store_mem(state, sign_extend(ptr + 4 * 6, 47), 25)?; // auxv[2] = AT_RANDOM
+    state
+        .memory
+        .set_memory_doubleword(sign_extend(ptr + 4 * 7, 47), sign_extend(ptr + 4 * 9, 47))?; // auxv[3] = address of 16 bytes
+    store_mem(state, sign_extend(ptr + 4 * 8, 47), 0)?; // auxv[term] = 0
 
     // 16 bytes of "randomness"
-    state.memory.set_memory_range(ptr + 4 * 9, b"4;byfairdiceroll".as_slice())?;
+    state
+        .memory
+        .set_memory_range(sign_extend(ptr + 4 * 9, 47), b"4;byfairdiceroll".as_slice())?;
 
     Ok(())
 }
 
-/// A multi reader is a reader that reads from the first reader until it returns 0, then reads from
-/// the second reader.
-struct MultiReader<R1: Read, R2: Read>(R1, R2);
+/// A multi reader is a reader that reads from the first reader until it returns 0, then reads from the second reader.
+pub struct MultiReader<R1: Read, R2: Read>(R1, R2);
 
 impl<R1: Read, R2: Read> Read for MultiReader<R1, R2> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {

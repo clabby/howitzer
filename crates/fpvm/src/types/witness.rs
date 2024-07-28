@@ -1,20 +1,19 @@
 //! This module contains the various witness types.
 
 use crate::{
-    types::{State, StateWitness},
-    utils::keccak256,
+    memory::MEMORY_PROOF_SIZE, types::{State, StateWitness}, utils::keccak256
 };
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_sol_types::{sol, SolCall};
 use kona_preimage::PreimageKeyType;
 
 /// The size of an encoded [StateWitness] in bytes.
-pub const STATE_WITNESS_SIZE: usize = 226;
+pub const STATE_WITNESS_SIZE: usize = 378;
 
 /// Compute the hash of the [StateWitness]
 pub fn state_hash(witness: StateWitness) -> [u8; 32] {
     let mut hash = keccak256(witness);
-    let offset = 32 * 2 + 4 * 6;
+    let offset = 32 * 2 + 8 * 6;
     let exit_code = witness[offset];
     let exited = witness[offset + 1] == 1;
     hash[0] = State::vm_status(exited, exit_code) as u8;
@@ -34,14 +33,14 @@ pub struct StepWitness {
     /// The preimage value
     pub preimage_value: Option<Vec<u8>>,
     /// The preimage offset
-    pub preimage_offset: Option<u32>,
+    pub preimage_offset: Option<u64>,
 }
 
 impl Default for StepWitness {
     fn default() -> Self {
         Self {
             state: [0u8; STATE_WITNESS_SIZE],
-            mem_proof: Vec::with_capacity(28 * 32 * 2),
+            mem_proof: Vec::with_capacity(MEMORY_PROOF_SIZE * 32 * 2),
             preimage_key: Default::default(),
             preimage_value: Default::default(),
             preimage_offset: Default::default(),

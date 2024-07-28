@@ -1,14 +1,18 @@
 //! This module contains the MIPS VM implementation for the [InstrumentedState].
 
+use super::mips_instruction::{IType, JType, Opcode, RType, Special2Function, SpecialFunction};
 use crate::{
     memory::{page, MemoryReader},
-    mips::instrumented::{MIPS_EBADF, MIPS_EINVAL},
-    types::{Address, Fd, Syscall},
+    types::{Address, DoubleWord, Fd, Syscall},
+    utils::sign_extend,
     InstrumentedState,
 };
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::io::{self, BufReader, Read, Write};
+
+pub(crate) const MIPS_EBADF: u64 = 0x9;
+pub(crate) const MIPS_EINVAL: u64 = 0x16;
 
 impl<O, E, P> InstrumentedState<O, E, P>
 where
@@ -16,187 +20,401 @@ where
     E: Write,
     P: HintRouter + PreimageFetcher,
 {
-    /// Read the preimage for the given key and offset from the [PreimageOracle] server.
-    ///
-    /// ### Takes
-    /// - `key`: The key of the preimage (the preimage's [alloy_primitives::keccak256] digest).
-    /// - `offset`: The offset of the preimage to fetch.
-    ///
-    /// ### Returns
-    /// - `Ok((data, data_len))`: The preimage data and length.
-    /// - `Err(_)`: An error occurred while fetching the preimage.
-    #[inline(always)]
-    pub(crate) async fn read_preimage(
-        &mut self,
-        key: [u8; 32],
-        offset: u32,
-    ) -> Result<([u8; 32], usize)> {
-        if key != self.last_preimage_key {
-            let data = self.preimage_oracle.get_preimage(key.try_into()?).await?;
-            self.last_preimage_key = key;
-
-            // Add the length prefix to the preimage
-            // Resizes the `last_preimage` vec in-place to reduce reallocations.
-            self.last_preimage.resize(8 + data.len(), 0);
-            self.last_preimage[0..8].copy_from_slice(&data.len().to_be_bytes());
-            self.last_preimage[8..].copy_from_slice(&data);
-        }
-
-        self.last_preimage_offset = offset;
-
-        let mut data = [0u8; 32];
-        let data_len =
-            BufReader::new(&self.last_preimage[offset as usize..]).read(data.as_mut_slice())?;
-        Ok((data, data_len))
-    }
-
-    /// Track an access to [crate::Memory] at the given [Address].
-    ///
-    /// ### Takes
-    /// - `effective_address`: The address in [crate::Memory] being accessed.
-    ///
-    /// ### Returns
-    /// - A [Result] indicating if the operation was successful.
-    #[inline(always)]
-    pub(crate) fn track_mem_access(&mut self, effective_address: Address) -> Result<()> {
-        if self.mem_proof_enabled && self.last_mem_access != effective_address {
-            if self.last_mem_access != Address::MAX {
-                anyhow::bail!("Unexpected diffrent memory access at {:x}, already have access at {:x} buffered", effective_address, self.last_mem_access);
-            }
-
-            self.last_mem_access = effective_address;
-            self.mem_proof = self.state.memory.merkle_proof(effective_address)?;
-        }
-        Ok(())
-    }
-
     /// Performs a single step of the MIPS thread context emulation.
     ///
     /// ### Returns
     /// - A [Result] indicating if the step was successful.
-    #[inline(always)]
+    #[inline]
     pub(crate) async fn inner_step(&mut self) -> Result<()> {
+        // Return early if the program is already exited; There is no more work to do.
         if self.state.exited {
             return Ok(());
         }
 
+        // Increment the instruction counter.
         self.state.step += 1;
 
-        // Fetch the instruction
-        let instruction = self.state.memory.get_memory(self.state.pc as Address)?;
-        let opcode = instruction >> 26;
+        // Fetch the instruction from memory and extract the opcode from the high-order 6 bits.
+        let instruction = self.state.memory.get_memory_word(self.state.pc as Address)?;
+        let opcode = Opcode::try_from(instruction >> 26)?;
 
-        // j-type j/jal
-        if (2..=3).contains(&opcode) {
-            let link_reg = if opcode == 3 { 31 } else { 0 };
+        // Handle J-type - J/JAL
+        if matches!(opcode, Opcode::J | Opcode::JAL) {
+            // J has no link register, only JAL.
+            let link_reg = if matches!(opcode, Opcode::JAL) { 31 } else { 0 };
+            let j_type = JType::decode(instruction)?;
+
             // Take the top 4 bits of the next PC (its 256MB region), and concatenate with the
-            // 26-bit offset
-            let target = self.state.next_pc & 0xF0000000 | ((instruction & 0x03FFFFFF) << 2);
+            // 26-bit `instr_index` within the instruction, left shifted 2 bits.
+            // target format (bits): `next_pc[0..36] | instr_index | 00`
+            let target =
+                self.state.next_pc & 0xFF_FF_FF_FF_F0_00_00_00 | ((j_type.address as u64) << 2);
             return self.handle_jump(link_reg, target);
         }
 
-        // Register fetch
-        let mut rs = self.state.registers[((instruction >> 21) & 0x1F) as usize]; // source register 1 value
-        let mut rt = 0; // source register 2 / temp value
-        let rt_reg = (instruction >> 16) & 0x1F;
+        // Handle branch instructions
+        if matches!(
+            opcode,
+            Opcode::BEQ | Opcode::BNE | Opcode::BLEZ | Opcode::BGTZ | Opcode::REGIMM
+        ) {
+            let i_type = IType::decode(instruction)?;
+            return self.handle_branch(opcode, i_type);
+        }
 
-        // R-type or I-type (stores rt)
-        let mut rd_reg = rt_reg;
-        if [0, 0x1c].contains(&opcode) {
-            // R-type (stores rd)
-            rt = self.state.registers[rt_reg as usize];
-            rd_reg = (instruction >> 11) & 0x1F;
-        } else if opcode < 20 {
-            // rt is SignExtImm
-            // Don't sign extend for andi, ori, xori
-            if (0x0c..=0x0e).contains(&opcode) {
-                // ZeroExtImm
-                rt = instruction & 0xFFFF;
+        // Handle SPECIAL and SPECIAL2 R-Type instructions
+        if matches!(opcode, Opcode::SPECIAL | Opcode::SPECIAL2) {
+            let r_type = RType::decode(instruction)?;
+            match self.execute_special(opcode, r_type).await? {
+                Some(val) => return self.handle_rd(r_type.rd as usize, val, true),
+                None => return Ok(()),
+            }
+        }
+
+        // Handle ALU immediate instructions
+        if matches!(
+            opcode,
+            Opcode::ADDI
+                | Opcode::ADDIU
+                | Opcode::SLTI
+                | Opcode::SLTIU
+                | Opcode::ANDI
+                | Opcode::ORI
+                | Opcode::XORI
+                | Opcode::DADDI
+                | Opcode::DADDIU
+        ) {
+            let i_type = IType::decode(instruction)?;
+
+            // Zero extend for ANDI, ORI, XORI. Otherwise, sign extend.
+            let rt_val = if matches!(opcode, Opcode::ANDI | Opcode::ORI | Opcode::XORI) {
+                i_type.imm as DoubleWord
             } else {
-                // SignExtImm
-                rt = sign_extend(instruction & 0xFFFF, 16);
+                sign_extend(i_type.imm as DoubleWord, 16)
+            };
+            let rs_val = self.state.registers[i_type.rs as usize];
+
+            let val = self.execute_immediate_alu(opcode, rs_val, rt_val)?;
+            return self.handle_rd(i_type.rt as usize, val, true);
+        }
+
+        // Handle remaining I-type instructions
+        let i_type = IType::decode(instruction)?;
+        let (rd_reg_index, store_address, val) = self.execute_i_type(opcode, i_type)?;
+
+        if let Some(address) = store_address {
+            self.track_mem_access(address)?;
+            self.state.memory.set_memory_doubleword(address, val)?;
+        }
+
+        return self.handle_rd(rd_reg_index, val, true);
+    }
+
+    /// Executes a [Opcode::SPECIAL] or [Opcode::SPECIAL2] instruction.
+    ///
+    /// ### Takes
+    /// - `opcode`: The opcode of the special instruction.
+    /// - `instruction`: The [RType] instruction being executed.
+    ///
+    /// ### Returns
+    /// - A [Result] indicating if the special dispatch was successful.
+    pub(crate) async fn execute_special(
+        &mut self,
+        opcode: Opcode,
+        instruction: RType,
+    ) -> Result<Option<DoubleWord>> {
+        let rs_val = self.state.registers[instruction.rs as usize];
+        let rt_val = self.state.registers[instruction.rt as usize];
+        let res = match opcode {
+            Opcode::SPECIAL => {
+                let funct = SpecialFunction::try_from(instruction.funct)?;
+
+                match funct {
+                    // MIPS32
+                    SpecialFunction::SLL => {
+                        Some(sign_extend((rt_val & 0xFFFFFFFF) << instruction.shamt, 32))
+                    }
+                    SpecialFunction::SRL => {
+                        Some(sign_extend((rt_val & 0xFFFFFFFF) >> instruction.shamt, 32))
+                    }
+                    SpecialFunction::SRA => Some(sign_extend(
+                        (rt_val & 0xFFFFFFFF) >> instruction.shamt,
+                        32 - instruction.shamt as u64,
+                    )),
+                    SpecialFunction::SLLV => Some(sign_extend((rt_val & 0xFFFFFFFF) << rs_val, 32)),
+                    SpecialFunction::SRLV => Some(sign_extend((rt_val & 0xFFFFFFFF) >> rs_val, 32)),
+                    SpecialFunction::SRAV => {
+                        Some(sign_extend((rt_val & 0xFFFFFFFF) >> rs_val, 32 - rs_val as u64))
+                    }
+                    SpecialFunction::JR | SpecialFunction::JALR => {
+                        let link_reg = if matches!(funct, SpecialFunction::JALR) {
+                            instruction.rd as usize
+                        } else {
+                            0
+                        };
+                        self.handle_jump(link_reg, rs_val)?;
+                        None
+                    }
+                    SpecialFunction::MOVZ => {
+                        self.handle_rd(instruction.rd as usize, rs_val, rt_val == 0)?;
+                        None
+                    }
+                    SpecialFunction::MOVN => {
+                        self.handle_rd(instruction.rd as usize, rs_val, rt_val != 0)?;
+                        None
+                    }
+                    SpecialFunction::SYSCALL => {
+                        self.handle_syscall().await?;
+                        None
+                    }
+                    SpecialFunction::SYNC => {
+                        // no-op
+                        Some(rs_val)
+                    }
+                    SpecialFunction::MFHI
+                    | SpecialFunction::MTHI
+                    | SpecialFunction::MFLO
+                    | SpecialFunction::MTLO
+                    | SpecialFunction::MULT
+                    | SpecialFunction::MULTU
+                    | SpecialFunction::DIV
+                    | SpecialFunction::DIVU => {
+                        self.handle_hi_lo(funct, rs_val, rt_val, instruction.rd as usize)?;
+                        None
+                    }
+                    SpecialFunction::ADD => {
+                        Some(self.execute_immediate_alu(Opcode::ADDI, rs_val, rt_val)?)
+                    }
+                    SpecialFunction::ADDU => {
+                        Some(self.execute_immediate_alu(Opcode::ADDI, rs_val, rt_val)?)
+                    }
+                    SpecialFunction::SUB => Some(sign_extend(rs_val - rt_val, 32)),
+                    SpecialFunction::SUBU => Some(sign_extend(rs_val - rt_val, 32)),
+                    SpecialFunction::AND => {
+                        Some(self.execute_immediate_alu(Opcode::ANDI, rs_val, rt_val)?)
+                    }
+                    SpecialFunction::OR => {
+                        Some(self.execute_immediate_alu(Opcode::ORI, rs_val, rt_val)?)
+                    }
+                    SpecialFunction::XOR => {
+                        Some(self.execute_immediate_alu(Opcode::XORI, rs_val, rt_val)?)
+                    }
+                    SpecialFunction::NOR => Some(!(rs_val | rt_val)),
+                    SpecialFunction::SLTI => {
+                        Some(((rs_val as i32) < (rt_val as i32)) as DoubleWord)
+                    }
+                    SpecialFunction::SLTIU => {
+                        Some(((rs_val as u32) < (rt_val as u32)) as DoubleWord)
+                    }
+                    SpecialFunction::TEQ => {
+                        if (rs_val as u32) == (rt_val as u32) {
+                            anyhow::bail!("TEQ: rs [{rs_val}] == rt [{rt_val}]");
+                        }
+                        Some(rs_val)
+                    }
+
+                    // MIPS64
+                    SpecialFunction::DSLLV => Some(rt_val << rs_val),
+                    SpecialFunction::DSRLV => Some(rt_val >> rs_val),
+                    SpecialFunction::DMULTU | SpecialFunction::DDIVU => {
+                        println!("rs: {:05b} | rd {} | shamt: {}", instruction.rs, instruction.rt, instruction.shamt);
+                        self.handle_hi_lo(funct, rs_val, rt_val, instruction.rd as usize)?;
+                        None
+                    }
+                    SpecialFunction::DADD => {
+                        Some(self.execute_immediate_alu(Opcode::DADDI, rs_val, rt_val)?)
+                    }
+                    SpecialFunction::DADDU => {
+                        Some(self.execute_immediate_alu(Opcode::DADDI, rs_val, rt_val)?)
+                    }
+                    SpecialFunction::DSUB => Some(rs_val.wrapping_sub(rt_val)),
+                    SpecialFunction::DSUBU => Some(rs_val.wrapping_sub(rt_val)),
+                    SpecialFunction::DSRL => Some(rt_val >> instruction.shamt),
+                    SpecialFunction::DSRA => Some(((rt_val as i64) >> instruction.shamt) as u64),
+                    SpecialFunction::DSLL => Some(rt_val << instruction.shamt),
+                    SpecialFunction::DSLL32 => Some(rt_val << (instruction.shamt + 32)),
+                    SpecialFunction::DSRL32 => Some(rt_val >> (instruction.shamt + 32)),
+                    SpecialFunction::DSRA32 => Some(((rt_val as i64) >> (instruction.shamt + 32)) as u64),
+                }
             }
-        } else if opcode >= 0x28 || [0x22, 0x26].contains(&opcode) {
-            // Store rt value with store
-            rt = self.state.registers[rt_reg as usize];
+            Opcode::SPECIAL2 => {
+                let funct = Special2Function::try_from(instruction.funct)?;
+                match funct {
+                    Special2Function::MUL => {
+                        Some(sign_extend(((rs_val as i32) * (rt_val as i32)) as u64, 32))
+                    }
+                    Special2Function::CLO | Special2Function::CLZ => {
+                        let mut rs = rs_val;
+                        if matches!(funct, Special2Function::CLO) {
+                            rs = !rs;
+                        }
+                        let mut i = 0u64;
 
-            // Store actual rt with lwl and lwr
-            rd_reg = rt_reg;
-        }
-
-        if (4..8).contains(&opcode) || opcode == 1 {
-            return self.handle_branch(opcode, instruction, rt_reg, rs);
-        }
-
-        let mut store_address: u32 = 0xFFFFFFFF;
-        let mut mem = 0;
-        // Memory fetch (all I-type)
-        // We also do the load for stores
-        if opcode >= 0x20 {
-            // M[R[rs]+SignExtImm]
-            rs += sign_extend(instruction & 0xFFFF, 16);
-            let address = rs & 0xFFFFFFFC;
-            self.track_mem_access(address as Address)?;
-
-            mem = self.state.memory.get_memory(address as Address)?;
-            if opcode >= 0x28 && opcode != 0x30 {
-                // Store
-                store_address = address;
-                // Store opcodes don't write back to a register
-                rd_reg = 0;
+                        while rs & 0x80000000 != 0 {
+                            rs <<= 1;
+                            i += 1;
+                        }
+                        Some(i)
+                    }
+                }
             }
+            _ => anyhow::bail!("Passed non-special opcode to execute_special: {opcode:?}"),
+        };
+
+        Ok(res)
+    }
+
+    /// Executes an immediate ALU operation within the MIPS thread context emulation.
+    ///
+    /// ### Takes
+    /// - `opcode`: The opcode of the immediate ALU instruction.
+    /// - `rs_val`: The value of the source register.
+    /// - `rt_val`: The value of the target register.
+    ///
+    /// ### Returns
+    /// - `Ok(n)` - The result of the immediate ALU operation.
+    /// - `Err(_)`: An error occurred while executing the immediate ALU operation.
+    pub(crate) fn execute_immediate_alu(
+        &mut self,
+        opcode: Opcode,
+        rs_val: DoubleWord,
+        rt_val: DoubleWord,
+    ) -> Result<DoubleWord> {
+        match opcode {
+            // MIPS32
+            Opcode::ADDI | Opcode::ADDIU => Ok(sign_extend(rs_val + rt_val, 32)),
+            Opcode::SLTI => Ok(((rs_val as i32) < (rt_val as i32)) as u64),
+            Opcode::SLTIU => Ok(((rs_val as u32) < (rt_val as u32)) as u64),
+            Opcode::ANDI => Ok(rs_val & rt_val),
+            Opcode::ORI => Ok(rs_val | rt_val),
+            Opcode::XORI => Ok(rs_val ^ rt_val),
+            // MIPS64
+            Opcode::DADDI | Opcode::DADDIU => Ok(rs_val + rt_val),
+            _ => anyhow::bail!(
+                "Passed non-immediate ALU instruction to execute_immediate_alu {:?}",
+                opcode
+            ),
         }
+    }
 
-        // ALU
-        let val = self.execute(instruction, rs, rt, mem)?;
+    /// Handles the execution of a MIPS instruction in the MIPS thread context emulation.
+    ///
+    /// ### Takes
+    /// - `instruction`: The instruction to execute.
+    /// - `rs`: The register index of the source register.
+    /// - `rt`: The register index of the target register.
+    /// - `mem`: The memory that the instruction is operating on.
+    ///
+    /// ### Returns
+    /// - `Ok(n)` - The result of the instruction execution.
+    /// - `Err(_)`: An error occurred while executing the instruction.
+    #[inline(always)]
+    pub(crate) fn execute_i_type(
+        &mut self,
+        opcode: Opcode,
+        instruction: IType,
+    ) -> Result<(usize, Option<Address>, DoubleWord)> {
+        let rs_val =
+            self.state.registers[instruction.rs as usize] + sign_extend(instruction.imm as u64, 16);
+        let rt_val = self.state.registers[instruction.rt as usize];
 
-        let fun = instruction & 0x3F;
-        if opcode == 0 && (8..0x1c).contains(&fun) {
-            match fun {
-                (8..=9) => {
-                    let link_reg = if fun == 9 { rd_reg } else { 0 };
-                    return self.handle_jump(link_reg, rs);
-                }
-                0x0A => {
-                    // movz
-                    return self.handle_rd(rd_reg, val, rt == 0);
-                }
-                0x0B => {
-                    // movn
-                    return self.handle_rd(rd_reg, val, rt != 0);
-                }
-                0x0C => {
-                    // syscall (can read and write)
-                    return self.handle_syscall().await;
-                }
-                (0x10..=0x1b) => {
-                    // lo and hi registers
-                    // Can write back
-                    return self.handle_hi_lo(fun, rs, rt, rd_reg);
-                }
-                _ => {}
+        let address = rs_val & 0xFFFFFFFFFFFFFFF8;
+        self.track_mem_access(address as Address)?;
+        let mem = self.state.memory.get_memory_doubleword(address as Address)?;
+
+        match opcode {
+            // MIPS32
+            Opcode::LUI => Ok((
+                instruction.rt as usize,
+                None,
+                sign_extend((instruction.imm as DoubleWord) << 16, 32),
+            )),
+            Opcode::LB => Ok((
+                instruction.rt as usize,
+                None,
+                sign_extend((mem >> (56 - ((rs_val & 0x7) << 3))) & 0xFF, 8),
+            )),
+            Opcode::LH => Ok((
+                instruction.rt as usize,
+                None,
+                sign_extend((mem >> (48 - ((rs_val & 0x6) << 3))) & 0xFFFF, 16),
+            )),
+            Opcode::LWL => {
+                let sl = (rs_val & 0x3) << 3;
+                let val = ((mem >> (32 - ((rs_val & 0x4) << 3))) << sl) & 0xFFFFFFFF;
+                let mask = (0xFFFFFFFFu32 << sl) as DoubleWord;
+                Ok((instruction.rt as usize, None, sign_extend((rt_val & !mask) | val, 32)))
             }
-        }
+            Opcode::LW | Opcode::LL => Ok((
+                instruction.rt as usize,
+                None,
+                sign_extend((mem >> (32 - ((rs_val & 0x4) << 3))) & 0xFFFFFFFF, 32),
+            )),
+            Opcode::LBU => {
+                Ok((instruction.rt as usize, None, (mem >> (56 - ((rs_val & 0x7) << 3))) & 0xFF))
+            }
+            Opcode::LHU => {
+                Ok((instruction.rt as usize, None, (mem >> (48 - ((rs_val & 0x6) << 3))) & 0xFFFF))
+            }
+            Opcode::LWR => {
+                let sr = 24 - ((rs_val & 0x3) << 3);
+                let val = ((mem >> (32 - ((rs_val & 0x4) << 3))) >> sr) & 0xFFFFFFFF;
+                let mask = (0xFFFFFFFFu32 >> sr) as DoubleWord;
+                Ok((instruction.rt as usize, None, sign_extend((rt_val & !mask) | val, 32)))
+            }
+            Opcode::SB => {
+                let sl = 56 - ((rs_val & 0x7) << 3);
+                let val = (rt_val & 0xFF) << sl;
+                let mask = DoubleWord::MAX ^ (0xFF << sl);
+                Ok((0, Some(address), (mem & mask) | val))
+            }
+            Opcode::SH => {
+                let sl = 48 - ((rs_val & 0x6) << 3);
+                let val = (rt_val & 0xFFFF) << sl;
+                let mask = DoubleWord::MAX ^ (0xFFFF << sl);
+                Ok((0, Some(address), (mem & mask) | val))
+            }
+            Opcode::SWL => {
+                let sr = (rs_val & 0x3) << 3;
+                let val = ((rt_val & 0xFFFFFFFF) >> sr) << (32 - ((rs_val & 0x4) << 3));
+                let mask = ((0xFFFFFFFFu32 >> sr) as u64) << (32 - ((rs_val & 0x4) << 3));
+                Ok((0, Some(address), (mem & !mask) | val))
+            }
+            Opcode::SW | Opcode::SC => {
+                let sl = 32 - ((rs_val & 0x4) << 3);
+                let val = (rt_val & 0xFFFFFFFF) << sl;
+                let mask = 0xFFFFFFFFFFFFFFFF ^ (0xFFFFFFFF << sl);
 
-        if opcode == 0x38 && rt_reg != 0 {
-            self.state.registers[rt_reg as usize] = 1;
-        }
+                if matches!(opcode, Opcode::SC) && instruction.rt != 0 {
+                    self.state.registers[instruction.rt as usize] = 1;
+                }
 
-        // Write memory
-        if store_address != 0xFFFFFFFF {
-            self.track_mem_access(store_address as Address)?;
-            self.state.memory.set_memory(store_address as Address, val)?;
+                Ok((0, Some(address), (mem & mask) | val))
+            }
+            Opcode::SWR => {
+                let sl = 24 - ((rs_val & 0x3) << 3);
+                let val = ((rt_val & 0xFFFFFFFF) << sl) << (32 - ((rs_val & 0x4) << 3));
+                let mask = ((0xFFFFFFFFu32 << sl) as u64) << (32 - ((rs_val & 0x4) << 3));
+                Ok((0, Some(address), (mem & !mask) | val))
+            }
+            // MIPS64
+            Opcode::LWU => Ok((
+                instruction.rt as usize,
+                None,
+                (mem >> (32 - ((rs_val & 0x4) << 3))) & 0xFFFFFFFF,
+            )),
+            Opcode::LD => Ok((instruction.rt as usize, None, mem)),
+            Opcode::SD => {
+                Ok((0, Some(address), rt_val))
+            }
+            _ => anyhow::bail!("Invalid opcode {:?}", opcode),
         }
-
-        // Write back the value to the destination register
-        self.handle_rd(rd_reg, val, true)
     }
 
     /// Handles a syscall within the MIPS thread context emulation.
     ///
     /// ### Returns
     /// - A [Result] indicating if the syscall dispatch was successful.
-    #[inline(always)]
+    #[inline]
     pub(crate) async fn handle_syscall(&mut self) -> Result<()> {
         let mut v0 = 0;
         let mut v1 = 0;
@@ -211,9 +429,9 @@ where
 
                     // Adjust the size to align with the page size if the size
                     // cannot fit within the page address mask.
-                    let masked_size = sz & page::PAGE_ADDRESS_MASK as u32;
+                    let masked_size = sz & page::PAGE_ADDRESS_MASK as u64;
                     if masked_size != 0 {
-                        sz += page::PAGE_SIZE as u32 - masked_size;
+                        sz += page::PAGE_SIZE as u64 - masked_size;
                     }
 
                     if a0 == 0 {
@@ -231,6 +449,7 @@ where
                     v0 = 1;
                 }
                 Syscall::ExitGroup => {
+                    dbg!("Syscall: {syscall}");
                     self.state.exited = true;
                     self.state.exit_code = a0 as u8;
                     return Ok(());
@@ -240,10 +459,10 @@ where
                         // Nothing to do; Leave v0 and v1 zero, read nothing, and give no error.
                     }
                     Ok(Fd::PreimageRead) => {
-                        let effective_address = (a1 & 0xFFFFFFFC) as Address;
+                        let effective_address = (a1 & 0xFFFFFFFFFFFFFFFC) as Address;
 
                         self.track_mem_access(effective_address)?;
-                        let memory = self.state.memory.get_memory(effective_address)?;
+                        let memory = self.state.memory.get_memory_word(effective_address)?;
 
                         let (data, mut data_len) = self
                             .read_preimage(self.state.preimage_key, self.state.preimage_offset)
@@ -262,9 +481,9 @@ where
                         out_mem[alignment..alignment + data_len].copy_from_slice(&data[..data_len]);
                         self.state
                             .memory
-                            .set_memory(effective_address, u32::from_be_bytes(out_mem))?;
-                        self.state.preimage_offset += data_len as u32;
-                        v0 = data_len as u32;
+                            .set_memory_word(effective_address, u32::from_be_bytes(out_mem))?;
+                        self.state.preimage_offset += data_len as u64;
+                        v0 = data_len as DoubleWord;
                     }
                     Ok(Fd::HintRead) => {
                         // Don't actually read anything into memory, just say we read it. The
@@ -272,7 +491,7 @@ where
                         v0 = a2;
                     }
                     _ => {
-                        v0 = 0xFFFFFFFF;
+                        v0 = DoubleWord::MAX;
                         v1 = MIPS_EBADF;
                     }
                 },
@@ -319,10 +538,11 @@ where
                         v0 = a2;
                     }
                     Ok(Fd::PreimageWrite) => {
-                        let effective_address = a1 & 0xFFFFFFFC;
+                        let effective_address = a1 & 0xFFFFFFFFFFFFFFFC;
                         self.track_mem_access(effective_address as Address)?;
 
-                        let memory = self.state.memory.get_memory(effective_address as Address)?;
+                        let memory =
+                            self.state.memory.get_memory_word(effective_address as Address)?;
                         let mut key = self.state.preimage_key;
                         let alignment = a1 & 0x3;
                         let space = 4 - alignment;
@@ -343,7 +563,7 @@ where
                         v0 = a2;
                     }
                     _ => {
-                        v0 = 0xFFFFFFFF;
+                        v0 = DoubleWord::MAX;
                         v1 = MIPS_EBADF;
                     }
                 },
@@ -357,13 +577,13 @@ where
                                 v0 = 1; // O_WRONLY
                             }
                             _ => {
-                                v0 = 0xFFFFFFFF;
+                                v0 = DoubleWord::MAX;
                                 v1 = MIPS_EBADF;
                             }
                         }
                     } else {
                         // The command is not recognized by this kernel.
-                        v0 = 0xFFFFFFFF;
+                        v0 = DoubleWord::MAX;
                         v1 = MIPS_EINVAL;
                     }
                 }
@@ -389,36 +609,30 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the branch dispatch was successful.
-    #[inline(always)]
-    pub(crate) fn handle_branch(
-        &mut self,
-        opcode: u32,
-        instruction: u32,
-        rt_reg: u32,
-        rs: u32,
-    ) -> Result<()> {
+    #[inline]
+    pub(crate) fn handle_branch(&mut self, opcode: Opcode, instruction: IType) -> Result<()> {
         if self.state.next_pc != self.state.pc + 4 {
             anyhow::bail!("Unexpected branch in delay slot at {:x}", self.state.pc,);
         }
 
+        let rs = self.state.registers[instruction.rs as usize];
+
         let should_branch = match opcode {
-            // beq / bne
-            4 | 5 => {
-                let rt = self.state.registers[rt_reg as usize];
-                (rs == rt && opcode == 4) || (rs != rt && opcode == 5)
+            Opcode::BEQ | Opcode::BNE => {
+                let rt = self.state.registers[instruction.rt as usize];
+                (rs == rt && matches!(opcode, Opcode::BEQ))
+                    || (rs != rt && matches!(opcode, Opcode::BNE))
             }
             // blez
-            6 => (rs as i32) <= 0,
+            Opcode::BLEZ => (rs as i32) <= 0,
             // bgtz
-            7 => (rs as i32) > 0,
-            1 => {
+            Opcode::BGTZ => (rs as i32) > 0,
+            Opcode::REGIMM => {
                 // regimm
-                let rtv = (instruction >> 16) & 0x1F;
-
-                if rtv == 0 {
+                if instruction.rt == 0 {
                     // bltz
                     (rs as i32) < 0
-                } else if rtv == 1 {
+                } else if instruction.rt == 1 {
                     // bgez
                     (rs as i32) >= 0
                 } else {
@@ -432,7 +646,8 @@ where
         self.state.pc = self.state.next_pc;
 
         if should_branch {
-            self.state.next_pc = prev_pc + 4 + (sign_extend(instruction & 0xFFFF, 16) << 2);
+            self.state.next_pc =
+                prev_pc + 4 + (sign_extend((instruction.imm << 2) as DoubleWord, 16));
         } else {
             // Branch not taken; proceed as normal.
             self.state.next_pc += 4;
@@ -451,55 +666,71 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the branch dispatch was successful.
-    #[inline(always)]
+    #[inline]
     pub(crate) fn handle_hi_lo(
         &mut self,
-        fun: u32,
-        rs: u32,
-        rt: u32,
-        store_reg: u32,
+        fun: SpecialFunction,
+        rs: DoubleWord,
+        rt: DoubleWord,
+        store_reg: usize,
     ) -> Result<()> {
         let val = match fun {
-            0x10 => {
+            // MIPS32
+            SpecialFunction::MFHI => {
                 // mfhi
                 self.state.hi
             }
-            0x11 => {
+            SpecialFunction::MTHI => {
                 // mthi
                 self.state.hi = rs;
                 0
             }
-            0x12 => {
+            SpecialFunction::MFLO => {
                 // mflo
                 self.state.lo
             }
-            0x13 => {
+            SpecialFunction::MTLO => {
                 // mtlo
                 self.state.lo = rs;
                 0
             }
-            0x18 => {
+            SpecialFunction::MULT => {
                 // mult
                 let acc = ((rs as i32) as i64) as u64 * ((rt as i32) as i64) as u64;
-                self.state.hi = (acc >> 32) as u32;
-                self.state.lo = acc as u32;
+                self.state.hi = sign_extend(acc >> 32, 32);
+                self.state.lo = sign_extend((acc as u32) as u64, 32);
                 0
             }
-            0x19 => {
+            SpecialFunction::MULTU => {
                 // multu
-                let acc = rs as u64 * rt as u64;
-                self.state.hi = (acc >> 32) as u32;
-                self.state.lo = acc as u32;
+                let acc = (rs as u32) as u64 * (rt as u32) as u64;
+                self.state.hi = sign_extend(acc >> 32, 32);
+                self.state.lo = sign_extend((acc as u32) as u64, 32);
                 0
             }
-            0x1a => {
+            SpecialFunction::DIV => {
                 // div
-                self.state.hi = (rs as i32 % rt as i32) as u32;
-                self.state.lo = (rs as i32 / rt as i32) as u32;
+                self.state.hi = sign_extend((rs as i32 % rt as i32) as u64, 32);
+                self.state.lo = sign_extend((rs as i32 / rt as i32) as u64, 32);
                 0
             }
-            0x1b => {
+            SpecialFunction::DIVU => {
                 // divu
+                self.state.hi = sign_extend((rs as u32 % rt as u32) as u64, 32);
+                self.state.lo = sign_extend((rs as u32 / rt as u32) as u64, 32);
+                0
+            }
+            // MIPS64
+            SpecialFunction::DMULTU => {
+                // dmultu
+                let acc = (rs as u128).wrapping_mul(rt as u128); // Perform 64-bit unsigned multiplication
+
+                self.state.hi = (acc >> 64) as u64; // Upper 64 bits
+                self.state.lo = acc as u64; // Lower 64 bits
+                0
+            }
+            SpecialFunction::DDIVU => {
+                // ddivu
                 self.state.hi = rs % rt;
                 self.state.lo = rs / rt;
                 0
@@ -508,7 +739,7 @@ where
         };
 
         if store_reg != 0 {
-            self.state.registers[store_reg as usize] = val;
+            self.state.registers[store_reg] = val;
         }
 
         self.state.pc = self.state.next_pc;
@@ -525,8 +756,8 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the branch dispatch was successful.
-    #[inline(always)]
-    pub(crate) fn handle_jump(&mut self, link_reg: u32, dest: u32) -> Result<()> {
+    #[inline]
+    pub(crate) fn handle_jump(&mut self, link_reg: usize, dest: Address) -> Result<()> {
         if self.state.next_pc != self.state.pc + 4 {
             anyhow::bail!("Unexpected jump in delay slot at {:x}", self.state.pc);
         }
@@ -549,8 +780,13 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the branch dispatch was successful.
-    #[inline(always)]
-    pub(crate) fn handle_rd(&mut self, store_reg: u32, val: u32, conditional: bool) -> Result<()> {
+    #[inline]
+    pub(crate) fn handle_rd(
+        &mut self,
+        store_reg: usize,
+        val: DoubleWord,
+        conditional: bool,
+    ) -> Result<()> {
         if store_reg >= 32 {
             anyhow::bail!("Invalid register index {}", store_reg);
         }
@@ -564,193 +800,57 @@ where
         Ok(())
     }
 
-    /// Handles the execution of a MIPS instruction in the MIPS thread context emulation.
+    /// Read the preimage for the given key and offset from the [PreimageOracle] server.
     ///
     /// ### Takes
-    /// - `instruction`: The instruction to execute.
-    /// - `rs`: The register index of the source register.
-    /// - `rt`: The register index of the target register.
-    /// - `mem`: The memory that the instruction is operating on.
+    /// - `key`: The key of the preimage (the preimage's [alloy_primitives::keccak256] digest).
+    /// - `offset`: The offset of the preimage to fetch.
     ///
     /// ### Returns
-    /// - `Ok(n)` - The result of the instruction execution.
-    /// - `Err(_)`: An error occurred while executing the instruction.
+    /// - `Ok((data, data_len))`: The preimage data and length.
+    /// - `Err(_)`: An error occurred while fetching the preimage.
     #[inline(always)]
-    pub(crate) fn execute(&mut self, instruction: u32, rs: u32, rt: u32, mem: u32) -> Result<u32> {
-        // Opcodes in MIPS are 6 bits in size, and stored in the high-order bits of the big-endian
-        // instruction.
-        let opcode = instruction >> 26;
+    pub(crate) async fn read_preimage(
+        &mut self,
+        key: [u8; 32],
+        offset: u64,
+    ) -> Result<([u8; 32], usize)> {
+        if key != self.last_preimage_key {
+            let data = self.preimage_oracle.get_preimage(key.try_into()?).await?;
+            self.last_preimage_key = key;
 
-        if opcode == 0 || (8..0xF).contains(&opcode) {
-            let fun = match opcode {
-                // addi
-                8 => 0x20,
-                // addiu
-                9 => 0x21,
-                // slti
-                0xA => 0x2A,
-                // sltiu
-                0xB => 0x2B,
-                // andi
-                0xC => 0x24,
-                // ori
-                0xD => 0x25,
-                // xori
-                0xE => 0x26,
-                _ => instruction & 0x3F,
-            };
-
-            match fun {
-                // sll
-                0 => Ok(rt << ((instruction >> 6) & 0x1F)),
-                // srl
-                2 => Ok(rt >> ((instruction >> 6) & 0x1F)),
-                // sra
-                3 => {
-                    let shamt = (instruction >> 6) & 0x1F;
-                    Ok(sign_extend(rt >> shamt, 32 - shamt))
-                }
-                // sslv
-                4 => Ok(rt << (rs & 0x1F)),
-                // srlv
-                6 => Ok(rt >> (rs & 0x1F)),
-                7 => Ok(sign_extend(rt >> rs, 32 - rs)),
-
-                // Functions in range [0x8, 0x1b] are handled specially by other functions.
-
-                // jr, jalr, movz, movn, syscall, sync, mfhi, mthi, mflo, mftlo, mult, multu, div,
-                // divu
-                (8..=0x0c) | (0x0f..=0x13) | (0x18..=0x1b) => Ok(rs),
-
-                // The rest are transformed R-type arithmetic imm instructions.
-
-                // add / addu
-                0x20 | 0x21 => Ok(rs + rt),
-                // sub / subu
-                0x22 | 0x23 => Ok(rs - rt),
-                // and
-                0x24 => Ok(rs & rt),
-                // or
-                0x25 => Ok(rs | rt),
-                // xor
-                0x26 => Ok(rs ^ rt),
-                // nor
-                0x27 => Ok(!(rs | rt)),
-                // slti
-                0x2a => Ok(((rs as i32) < (rt as i32)) as u32),
-                // sltiu
-                0x2b => Ok((rs < rt) as u32),
-                _ => anyhow::bail!("Invalid function code {:x}", fun),
-            }
-        } else {
-            match opcode {
-                // SPECIAL2
-                0x1C => {
-                    let fun = instruction & 0x3F;
-                    match fun {
-                        // mul
-                        0x02 => Ok(((rs as i32) * (rt as i32)) as u32),
-                        // clo
-                        0x20 | 0x21 => {
-                            let mut rs = rs;
-                            if fun == 0x20 {
-                                rs = !rs;
-                            }
-                            let mut i = 0u32;
-
-                            // TODO(clabby): Remove loop, do some good ol' bit twiddling instead.
-                            while rs & 0x80000000 != 0 {
-                                rs <<= 1;
-                                i += 1;
-                            }
-                            Ok(i)
-                        }
-                        _ => anyhow::bail!("Invalid function code {:x}", fun),
-                    }
-                }
-                // lui
-                0x0F => Ok(rt << 16),
-                // lb
-                0x20 => Ok(sign_extend((mem >> (24 - ((rs & 0x3) << 3))) & 0xFF, 8)),
-                // lh
-                0x21 => Ok(sign_extend((mem >> (16 - ((rs & 0x2) << 3))) & 0xFFFF, 16)),
-                // lwl
-                0x22 => {
-                    let sl = (rs & 0x3) << 3;
-                    let val = mem << sl;
-                    let mask = 0xFFFFFFFF << sl;
-                    Ok((rt & !mask) | val)
-                }
-                // lw
-                0x23 => Ok(mem),
-                // lbu
-                0x24 => Ok((mem >> (24 - ((rs & 0x3) << 3))) & 0xFF),
-                // lhu
-                0x25 => Ok((mem >> (16 - ((rs & 0x2) << 3))) & 0xFFFF),
-                // lwr
-                0x26 => {
-                    let sr = 24 - ((rs & 0x3) << 3);
-                    let val = mem >> sr;
-                    let mask = 0xFFFFFFFFu32 >> sr;
-                    Ok((rt & !mask) | val)
-                }
-                // sb
-                0x28 => {
-                    let sl = 24 - ((rs & 0x3) << 3);
-                    let val = (rt & 0xFF) << sl;
-                    let mask = 0xFFFFFFFF ^ (0xFF << sl);
-                    Ok((mem & mask) | val)
-                }
-                // sh
-                0x29 => {
-                    let sl = 16 - ((rs & 0x2) << 3);
-                    let val = (rt & 0xFFFF) << sl;
-                    let mask = 0xFFFFFFFF ^ (0xFFFF << sl);
-                    Ok((mem & mask) | val)
-                }
-                // swl
-                0x2a => {
-                    let sr = (rs & 0x3) << 3;
-                    let val = rt >> sr;
-                    let mask = 0xFFFFFFFFu32 >> sr;
-                    Ok((mem & !mask) | val)
-                }
-                // sw
-                0x2b => Ok(rt),
-                // swr
-                0x2e => {
-                    let sl = 24 - ((rs & 0x3) << 3);
-                    let val = rt << sl;
-                    let mask = 0xFFFFFFFF << sl;
-                    Ok((mem & !mask) | val)
-                }
-                // ll
-                0x30 => Ok(mem),
-                // sc
-                0x38 => Ok(rt),
-                _ => anyhow::bail!("Invalid opcode {:x}", opcode),
-            }
+            // Add the length prefix to the preimage
+            // Resizes the `last_preimage` vec in-place to reduce reallocations.
+            self.last_preimage.resize(8 + data.len(), 0);
+            self.last_preimage[0..8].copy_from_slice(&data.len().to_be_bytes());
+            self.last_preimage[8..].copy_from_slice(&data);
         }
-    }
-}
 
-/// Perform a sign extension of a value embedded in the lower bits of `data` up to
-/// the `index`th bit.
-///
-/// ### Takes
-/// - `data`: The data to sign extend.
-/// - `index`: The index of the bit to sign extend to.
-///
-/// ### Returns
-/// - The sign extended value.
-#[inline(always)]
-pub(crate) fn sign_extend(data: u32, index: u32) -> u32 {
-    let is_signed = (data >> (index - 1)) != 0;
-    let signed = ((1 << (32 - index)) - 1) << index;
-    let mask = (1 << index) - 1;
-    if is_signed {
-        (data & mask) | signed
-    } else {
-        data & mask
+        self.last_preimage_offset = offset;
+
+        let mut data = [0u8; 32];
+        let data_len =
+            BufReader::new(&self.last_preimage[offset as usize..]).read(data.as_mut_slice())?;
+        Ok((data, data_len))
+    }
+
+    /// Track an access to [crate::Memory] at the given [Address].
+    ///
+    /// ### Takes
+    /// - `effective_address`: The address in [crate::Memory] being accessed.
+    ///
+    /// ### Returns
+    /// - A [Result] indicating if the operation was successful.
+    #[inline(always)]
+    pub(crate) fn track_mem_access(&mut self, effective_address: Address) -> Result<()> {
+        if self.mem_proof_enabled && self.last_mem_access != effective_address {
+            if self.last_mem_access != Address::MAX {
+                anyhow::bail!("Unexpected diffrent memory access at {:x}, already have access at {:x} buffered", effective_address, self.last_mem_access);
+            }
+
+            self.last_mem_access = effective_address;
+            self.mem_proof = self.state.memory.merkle_proof(effective_address)?;
+        }
+        Ok(())
     }
 }

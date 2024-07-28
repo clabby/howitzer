@@ -18,14 +18,17 @@ pub type SharedCachedPage = Rc<RefCell<CachedPage>>;
 /// A [StateWitness] is an encoded commitment to the current [crate::State] of the MIPS emulator.
 pub type StateWitness = [u8; STATE_WITNESS_SIZE];
 
-/// A [PageIndex] is the index of a [Page] within the [crate::Memory] mappings.
-pub type PageIndex = u64;
+/// A single word within the MIPS64 architecture is 32 bits wide.
+pub type Word = u32;
+
+/// A double word within the MIPS64 architecture is 64 bits wide.
+pub type DoubleWord = u64;
 
 /// A [Gindex] is a generalized index, defined as $2^{\text{depth}} + \text{index}$.
 pub type Gindex = u64;
 
-/// An [Address] is a 32 bit address in the MIPS emulator's memory.
-pub type Address = u32;
+/// An [Address] is a 64 bit address in the MIPS emulator's memory.
+pub type Address = u64;
 
 /// The [VMStatus] is an indicator within the [StateWitness] hash that indicates
 /// the current status of the MIPS emulator.
@@ -77,10 +80,10 @@ pub enum Syscall {
     Fcntl = 4055,
 }
 
-impl TryFrom<u32> for Syscall {
+impl TryFrom<u64> for Syscall {
     type Error = anyhow::Error;
 
-    fn try_from(n: u32) -> Result<Self, Self::Error> {
+    fn try_from(n: u64) -> Result<Self, Self::Error> {
         match n {
             4090 => Ok(Syscall::Mmap),
             4045 => Ok(Syscall::Brk),

@@ -2,8 +2,8 @@
 
 use super::HowitzerSubcommandDispatcher;
 use anyhow::Result;
-use howitzer_kernel::KernelBuilder;
 use clap::Args;
+use howitzer_kernel::KernelBuilder;
 
 /// Command line arguments for `howitzer run`
 #[derive(Args, Debug)]
