@@ -45,7 +45,9 @@ pub enum Opcode {
     DADDI = 0x18,
     DADDIU = 0x19,
     LWU = 0x27,
+    LLD = 0x34,
     LD = 0x37,
+    SCD = 0x3C,
     SD = 0x3F,
 }
 
@@ -92,7 +94,9 @@ impl TryFrom<u32> for Opcode {
             0x18 => Ok(Opcode::DADDI),
             0x19 => Ok(Opcode::DADDIU),
             0x27 => Ok(Opcode::LWU),
+            0x34 => Ok(Opcode::LLD),
             0x37 => Ok(Opcode::LD),
+            0x3C => Ok(Opcode::SCD),
             0x3F => Ok(Opcode::SD),
             _ => anyhow::bail!("Invalid opcode: {:02x}", value),
         }

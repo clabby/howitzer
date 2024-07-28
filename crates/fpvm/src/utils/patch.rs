@@ -145,30 +145,26 @@ pub fn patch_stack(state: &mut State) -> Result<()> {
 
     // Allocate 1 page for the initial stack data, and 16KB = 4 pages for the stack to grow.
     state.memory.set_memory_range(
-        sign_extend(ptr - 4 * page::PAGE_SIZE as u64, 47),
+        sign_extend(ptr - 8 * page::PAGE_SIZE as u64, 47),
         [0u8; page::PAGE_SIZE * 5].as_slice(),
     )?;
     state.registers[29] = ptr;
 
     #[inline(always)]
-    fn store_mem(st: &mut State, address: Address, value: u32) -> Result<()> {
-        st.memory.set_memory_word(address, value)
+    fn store_mem(st: &mut State, address: Address, value: u64) -> Result<()> {
+        st.memory.set_memory_doubleword(address, value)
     }
 
-    // init argc, argv, aux on stack
-    store_mem(state, sign_extend(ptr + 4, 47), 0x42)?; // argc = 0 (argument count)
-    store_mem(state, sign_extend(ptr + 4 * 2, 47), 0x35)?; // argv[n] = 0 (terminating argv)
-    store_mem(state, sign_extend(ptr + 4 * 3, 47), 0)?; // envp[term] = 0 (no env vars)
-    store_mem(state, sign_extend(ptr + 4 * 4, 47), 6)?; // auxv[0] = _AT_PAGESZ = 6 (key)
-    store_mem(state, sign_extend(ptr + 4 * 5, 47), 4096)?; // auxv[1] = page size of 4 KiB (value) - (== minPhysPageSize)
-    store_mem(state, sign_extend(ptr + 4 * 6, 47), 25)?; // auxv[2] = AT_RANDOM
-    state
-        .memory
-        .set_memory_doubleword(sign_extend(ptr + 4 * 7, 47), sign_extend(ptr + 4 * 9, 47))?; // auxv[3] = address of 16 bytes
-    store_mem(state, sign_extend(ptr + 4 * 8, 47), 0)?; // auxv[term] = 0
-
-    // 16 bytes of "randomness"
-    state.memory.set_memory_range(sign_extend(ptr + 4 * 9, 47), b"4;byfairdiceroll".as_slice())?;
+    store_mem(state, ptr + 8, 0x42)?; // argc = 0 (argument count)
+    store_mem(state, ptr + 8 * 2, 0x35)?; // argv[n] = 0 (terminating argv)
+    store_mem(state, ptr + 8 * 3, 0)?; // envp[term] = 0 (no env vars)
+    store_mem(state, ptr + 8 * 4, 6)?; // auxv[0] = _AT_PAGESZ = 6 (key)
+    store_mem(state, ptr + 8 * 5, 4096)?; // auxv[1] = page size of 4 KiB (value) - (== minPhysPageSize)
+    store_mem(state, ptr + 8 * 6, 25)?; // auxv[2] = AT_RANDOM
+    store_mem(state, ptr + 8 * 7, ptr + 8 * 9)?; // auxv[3] = address of 16 bytes
+    store_mem(state, ptr + 8 * 8, 0)?; // auxv[term] = 0
+    store_mem(state, ptr + 8 * 9, 0x6f727020646e6172)?; // randomness 8/16
+    store_mem(state, ptr + 8 * 10, 0x6164626d616c6f74)?; // randomness 8/16
 
     Ok(())
 }

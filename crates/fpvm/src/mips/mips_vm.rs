@@ -406,7 +406,9 @@ where
                 None,
                 (mem >> (32 - ((rs_val & 0x4) << 3))) & 0xFFFFFFFF,
             )),
+            Opcode::LLD => Ok((instruction.rt as usize, None, mem)),
             Opcode::LD => Ok((instruction.rt as usize, None, mem)),
+            Opcode::SCD => todo!(),
             Opcode::SD => Ok((0, Some(address), rt_val)),
             _ => anyhow::bail!("Invalid opcode {:?}", opcode),
         }
