@@ -54,6 +54,9 @@ where
             // target format (bits): `next_pc[0..36] | instr_index | 00`
             let target =
                 self.state.next_pc & 0xFF_FF_FF_FF_F0_00_00_00 | ((j_type.address as u64) << 2);
+            if let Some(ref mut stack) = self.stack {
+                stack.push(self.state.pc, target);
+            }
             return self.handle_jump(link_reg, target);
         }
 
@@ -156,6 +159,9 @@ where
                         } else {
                             0
                         };
+                        if let Some(ref mut stack) = self.stack {
+                            stack.pop(self.state.pc);
+                        }
                         self.handle_jump(link_reg, rs_val)?;
                         None
                     }

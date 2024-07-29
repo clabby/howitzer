@@ -70,6 +70,7 @@ impl TryFrom<u8> for Fd {
 }
 
 /// A [Syscall] is a system call that can be made within the MIPS emulator.
+#[derive(Debug)]
 pub enum Syscall {
     Mmap = 5009,
     Brk = 5012,

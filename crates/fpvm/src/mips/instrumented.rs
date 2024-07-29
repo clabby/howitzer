@@ -2,7 +2,7 @@
 
 use crate::{
     memory::MEMORY_PROOF_SIZE,
-    types::{Address, State, StepWitness},
+    types::{Address, State, StepWitness}, utils::stack::Stack, utils::meta::Meta,
 };
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
@@ -39,6 +39,8 @@ where
     /// The offset we last read from, or max u64 if nothing is read at
     /// the current step.
     pub(crate) last_preimage_offset: u64,
+    /// Stack tracing
+    pub(crate) stack: Option<Stack>,
 }
 
 impl<O, E, P> InstrumentedState<O, E, P>
@@ -59,7 +61,12 @@ where
             last_preimage: Vec::default(),
             last_preimage_key: [0u8; 32],
             last_preimage_offset: 0,
+            stack: None,
         }
+    }
+
+    pub fn enable_stack_tracing(&mut self, meta: Meta) {
+        self.stack = Some(Stack::new(meta));
     }
 
     /// Step the MIPS emulator forward one instruction.
@@ -241,6 +248,7 @@ mod test {
         let err = BufWriter::new(Vec::default());
         let mut ins =
             InstrumentedState::new(state, StaticOracle::new(b"hello world".to_vec()), out, err);
+        ins.enable_stack_tracing(metadata.clone());
 
         let mut last_symbol = None;
         for _ in 0..400_000 {
