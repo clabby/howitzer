@@ -256,6 +256,11 @@ mod test {
             ins.step(false).await.unwrap();
         }
 
+        println!("STDOUT:");
+        println!("{}", String::from_utf8(ins.std_out.buffer().to_vec()).unwrap().replace("\\n", "\n"));
+        println!("STDERR:");
+        println!("{}", String::from_utf8(ins.std_err.buffer().to_vec()).unwrap().replace("\\n", "\n"));
+
         assert!(ins.state.exited, "must exit");
         assert_eq!(ins.state.exit_code, 0, "must exit with 0");
 

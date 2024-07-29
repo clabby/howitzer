@@ -77,7 +77,7 @@ pub enum Syscall {
     ExitGroup = 5205,
     Read = 5000,
     Write = 5001,
-    Fcntl = 4055,
+    Fcntl = 5070,
 }
 
 impl TryFrom<u64> for Syscall {
@@ -91,7 +91,7 @@ impl TryFrom<u64> for Syscall {
             5205 => Ok(Syscall::ExitGroup),
             5000 => Ok(Syscall::Read),
             5001 => Ok(Syscall::Write),
-            4055 => Ok(Syscall::Fcntl),
+            5070 => Ok(Syscall::Fcntl),
             _ => anyhow::bail!("Failed to convert {} to Syscall", n),
         }
     }

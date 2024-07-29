@@ -1,6 +1,9 @@
 //! This module contains utilities for loading ELF files into [State] objects.
 
-use crate::{memory::page, types::{Address, State}, utils::sign_extend};
+use crate::{
+    memory::page,
+    types::{Address, State},
+};
 use anyhow::Result;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 use std::io::{self, Cursor, Read};
@@ -121,7 +124,7 @@ pub fn patch_go(raw: &[u8], state: &mut State) -> Result<()> {
             )?;
         } else if name == "runtime.MemProfileRate" {
             // disable mem profiling, to avoid a lot of unnecessary floating point ops
-            state.memory.set_memory_word(symbol.st_value, 0)?;
+            state.memory.set_memory_doubleword(symbol.st_value, 0)?;
         }
     }
     Ok(())
