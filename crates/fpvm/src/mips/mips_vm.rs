@@ -401,15 +401,35 @@ where
                 Ok((0, Some(address), (mem & !mask) | val))
             }
             // MIPS64
+            Opcode::SDL => {
+                println!("SDL: {:x} {:x}", rs_val, rt_val);
+                let val = rt_val >> ((rs_val & 0x7) << 3);
+                let mask = u64::MAX >> ((rs_val & 0x7) << 3);
+                Ok((0, Some(address), (mem & !mask) | val))
+            }
+            Opcode::SDR => {
+                println!("SDR: {:x} {:x}", rs_val, rt_val);
+                let val = rt_val << 56 - ((rs_val & 0x7) << 3);
+                let mask = u64::MAX << (56 - ((rs_val & 0x7) << 3));
+                Ok((0, Some(address), (mem & !mask) | val))
+            }
             Opcode::LWU => Ok((
                 instruction.rt as usize,
                 None,
                 (mem >> (32 - ((rs_val & 0x4) << 3))) & 0xFFFFFFFF,
             )),
-            Opcode::LLD => Ok((instruction.rt as usize, None, mem)),
-            Opcode::LD => Ok((instruction.rt as usize, None, mem)),
-            Opcode::SCD => todo!(),
-            Opcode::SD => Ok((0, Some(address), rt_val)),
+            Opcode::LD | Opcode::LLD => Ok((instruction.rt as usize, None, mem)),
+            Opcode::SD | Opcode::SCD => {
+                let shift_left = (rs_val & 0x7) << 3;
+                let val = rt_val << shift_left;
+                let mask = u64::MAX << shift_left;
+
+                if matches!(opcode, Opcode::SCD) && instruction.rt != 0 {
+                    self.state.registers[instruction.rt as usize] = 1;
+                }
+
+                Ok((0, Some(address), (mem & !mask) | (val & mask)))
+            }
             _ => anyhow::bail!("Invalid opcode {:?}", opcode),
         }
     }

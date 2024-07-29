@@ -1,10 +1,6 @@
 //! This module contains utilities for loading ELF files into [State] objects.
 
-use crate::{
-    memory::page,
-    types::{Address, State},
-    utils::sign_extend,
-};
+use crate::{memory::page, types::{Address, State}, utils::sign_extend};
 use anyhow::Result;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 use std::io::{self, Cursor, Read};
@@ -145,7 +141,7 @@ pub fn patch_stack(state: &mut State) -> Result<()> {
 
     // Allocate 1 page for the initial stack data, and 16KB = 4 pages for the stack to grow.
     state.memory.set_memory_range(
-        sign_extend(ptr - 8 * page::PAGE_SIZE as u64, 47),
+        ptr - 8 * page::PAGE_SIZE as u64,
         [0u8; page::PAGE_SIZE * 5].as_slice(),
     )?;
     state.registers[29] = ptr;

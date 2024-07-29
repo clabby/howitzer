@@ -44,6 +44,8 @@ pub enum Opcode {
     // MIPS64
     DADDI = 0x18,
     DADDIU = 0x19,
+    SDL = 0x2C,
+    SDR = 0x2D,
     LWU = 0x27,
     LLD = 0x34,
     LD = 0x37,
@@ -93,6 +95,8 @@ impl TryFrom<u32> for Opcode {
             // MIPS64
             0x18 => Ok(Opcode::DADDI),
             0x19 => Ok(Opcode::DADDIU),
+            0x2C => Ok(Opcode::SDL),
+            0x2D => Ok(Opcode::SDR),
             0x27 => Ok(Opcode::LWU),
             0x34 => Ok(Opcode::LLD),
             0x37 => Ok(Opcode::LD),
