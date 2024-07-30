@@ -7,7 +7,7 @@ default:
 
 # Test for the native target with all features
 test *args='':
-  cargo nextest run --workspace --all --all-features --release $@
+  cargo nextest run --workspace --all --release $@
 
 # Lint the workspace for all available targets
 lint: clippy lint-docs

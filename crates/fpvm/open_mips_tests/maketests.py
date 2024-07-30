@@ -10,7 +10,7 @@ def maketest(d, out):
   with tempfile.NamedTemporaryFile() as nf:
     print("building", d, "->", out)
     # which mips is go
-    ret = os.system("mips-linux-gnu-as -defsym big_endian=1 -march=mips32r2 -o %s %s" % (nf.name, d))
+    ret = os.system("mips-linux-gnu-as -defsym big_endian=1 -march=mips64 -o %s %s" % (nf.name, d))
     assert(ret == 0)
     nf.seek(0)
     elffile = ELFFile(nf)

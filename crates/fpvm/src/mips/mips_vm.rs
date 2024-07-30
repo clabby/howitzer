@@ -78,15 +78,15 @@ where
         // Handle ALU immediate instructions
         if matches!(
             opcode,
-            Opcode::ADDI
-                | Opcode::ADDIU
-                | Opcode::SLTI
-                | Opcode::SLTIU
-                | Opcode::ANDI
-                | Opcode::ORI
-                | Opcode::XORI
-                | Opcode::DADDI
-                | Opcode::DADDIU
+            Opcode::ADDI |
+                Opcode::ADDIU |
+                Opcode::SLTI |
+                Opcode::SLTIU |
+                Opcode::ANDI |
+                Opcode::ORI |
+                Opcode::XORI |
+                Opcode::DADDI |
+                Opcode::DADDIU
         ) {
             let i_type = IType::decode(instruction)?;
 
@@ -180,14 +180,14 @@ where
                         // no-op
                         Some(rs_val)
                     }
-                    SpecialFunction::MFHI
-                    | SpecialFunction::MTHI
-                    | SpecialFunction::MFLO
-                    | SpecialFunction::MTLO
-                    | SpecialFunction::MULT
-                    | SpecialFunction::MULTU
-                    | SpecialFunction::DIV
-                    | SpecialFunction::DIVU => {
+                    SpecialFunction::MFHI |
+                    SpecialFunction::MTHI |
+                    SpecialFunction::MFLO |
+                    SpecialFunction::MTLO |
+                    SpecialFunction::MULT |
+                    SpecialFunction::MULTU |
+                    SpecialFunction::DIV |
+                    SpecialFunction::DIVU => {
                         self.handle_hi_lo(funct, rs_val, rt_val, instruction.rd as usize)?;
                         None
                     }
@@ -198,7 +198,15 @@ where
                         Some(self.execute_immediate_alu(Opcode::ADDI, rs_val, rt_val)?)
                     }
                     SpecialFunction::SUB => Some(sign_extend(rs_val - rt_val, 32)),
-                    SpecialFunction::SUBU => Some(sign_extend(rs_val - rt_val, 32)),
+                    SpecialFunction::SUBU => {
+                        println!(
+                            "SUBU: {} (rs = {:08x} | rt = {:08x})",
+                            rs_val - rt_val,
+                            rs_val,
+                            rt_val
+                        );
+                        Some(sign_extend(rs_val - rt_val, 32))
+                    }
                     SpecialFunction::AND => {
                         Some(self.execute_immediate_alu(Opcode::ANDI, rs_val, rt_val)?)
                     }
@@ -209,12 +217,8 @@ where
                         Some(self.execute_immediate_alu(Opcode::XORI, rs_val, rt_val)?)
                     }
                     SpecialFunction::NOR => Some(!(rs_val | rt_val)),
-                    SpecialFunction::SLT => {
-                        Some(((rs_val as i64) < (rt_val as i64)) as DoubleWord)
-                    }
-                    SpecialFunction::SLTU => {
-                        Some((rs_val < rt_val) as DoubleWord)
-                    }
+                    SpecialFunction::SLT => Some(((rs_val as i64) < (rt_val as i64)) as DoubleWord),
+                    SpecialFunction::SLTU => Some((rs_val < rt_val) as DoubleWord),
 
                     // MIPS64
                     SpecialFunction::DSLLV => Some(rt_val << (rs_val & 0x3F)),
@@ -283,6 +287,7 @@ where
     /// ### Returns
     /// - `Ok(n)` - The result of the immediate ALU operation.
     /// - `Err(_)`: An error occurred while executing the immediate ALU operation.
+    #[inline]
     pub(crate) fn execute_immediate_alu(
         &mut self,
         opcode: Opcode,
@@ -293,7 +298,15 @@ where
             // MIPS32
             Opcode::ADDI | Opcode::ADDIU => Ok(sign_extend(rs_val + rt_val, 32)),
             Opcode::SLTI => Ok(((rs_val as i64) < (rt_val as i64)) as u64),
-            Opcode::SLTIU => Ok((rs_val < rt_val) as u64),
+            Opcode::SLTIU => {
+                println!(
+                    "SLTIU: rs[{}] rt[{}] | rs<rt = {}",
+                    rs_val,
+                    rt_val,
+                    (rs_val < rt_val) as u64
+                );
+                Ok((rs_val < rt_val) as u64)
+            }
             Opcode::ANDI => Ok(rs_val & rt_val),
             Opcode::ORI => Ok(rs_val | rt_val),
             Opcode::XORI => Ok(rs_val ^ rt_val),
@@ -317,7 +330,7 @@ where
     /// ### Returns
     /// - `Ok((rd_idx, Option<store_address>, value))` - The result of the instruction execution.
     /// - `Err(_)`: An error occurred while executing the instruction.
-    #[inline(always)]
+    #[inline]
     pub(crate) fn execute_i_type(
         &mut self,
         opcode: Opcode,
@@ -349,10 +362,16 @@ where
                 sign_extend((mem >> (48 - ((rs_val & 0x6) << 3))) & 0xFFFF, 16),
             )),
             Opcode::LWL => {
+                // Grab the # of bytes to load from the word
+                // This is the distance to the nearest aligned offset * 8
                 let sl = (rs_val & 0x3) << 3;
-                let val = ((mem >> (32 - ((rs_val & 0x4) << 3))) << sl) & 0xFFFFFFFF;
-                let mask = (0xFFFFFFFFu32 << sl) as DoubleWord;
-                Ok((instruction.rt as usize, None, sign_extend((rt_val & !mask) | val, 32)))
+                // Pull the bytes into the upper part of the word
+                let val = mem << sl;
+                // Create a mask for the untouched part of the dest register
+                let mask = 0xFFFFFFFFu64 >> (32 - sl);
+                // Merge the values
+                let merged = (val | (rt_val & mask)) & 0xFFFFFFFF;
+                Ok((instruction.rt as usize, None, sign_extend(merged, 32)))
             }
             Opcode::LW | Opcode::LL => Ok((
                 instruction.rt as usize,
@@ -366,10 +385,16 @@ where
                 Ok((instruction.rt as usize, None, (mem >> (48 - ((rs_val & 0x6) << 3))) & 0xFFFF))
             }
             Opcode::LWR => {
+                // Grab the # of bytes to load from the word
+                // This is the distance to the nearest aligned offset * 8
                 let sr = 24 - ((rs_val & 0x3) << 3);
-                let val = ((mem >> (32 - ((rs_val & 0x4) << 3))) >> sr) & 0xFFFFFFFF;
-                let mask = (0xFFFFFFFFu32 >> sr) as DoubleWord;
-                Ok((instruction.rt as usize, None, sign_extend((rt_val & !mask) | val, 32)))
+                // Pull the bytes into the lower part of the word
+                let val = mem >> sr;
+                // Create a mask for the untouched part of the dest register
+                let mask = 0xFFFFFFFFu64 << (32 - sr);
+                // Merge the values
+                let merged = (val | (rt_val & mask)) & 0xFFFFFFFF;
+                Ok((instruction.rt as usize, None, sign_extend(merged, 32)))
             }
             Opcode::SB => {
                 let sl = 56 - ((rs_val & 0x7) << 3);
@@ -651,8 +676,8 @@ where
         let should_branch = match opcode {
             Opcode::BEQ | Opcode::BNE => {
                 let rt = self.state.registers[instruction.rt as usize];
-                (rs == rt && matches!(opcode, Opcode::BEQ))
-                    || (rs != rt && matches!(opcode, Opcode::BNE))
+                (rs == rt && matches!(opcode, Opcode::BEQ)) ||
+                    (rs != rt && matches!(opcode, Opcode::BNE))
             }
             // blez
             Opcode::BLEZ => (rs as i64) <= 0,
@@ -850,7 +875,7 @@ where
     /// ### Returns
     /// - `Ok((data, data_len))`: The preimage data and length.
     /// - `Err(_)`: An error occurred while fetching the preimage.
-    #[inline(always)]
+    #[inline]
     pub(crate) async fn read_preimage(
         &mut self,
         key: [u8; 32],
@@ -882,7 +907,7 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the operation was successful.
-    #[inline(always)]
+    #[inline]
     pub(crate) fn track_mem_access(&mut self, effective_address: Address) -> Result<()> {
         if self.mem_proof_enabled && self.last_mem_access != effective_address {
             if self.last_mem_access != Address::MAX {
