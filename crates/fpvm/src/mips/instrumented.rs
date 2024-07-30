@@ -77,8 +77,8 @@ where
             .then(|| {
                 let instruction_proof = self.state.memory.merkle_proof(self.state.pc as Address)?;
 
-                let mut mem_proof = vec![0; 28 * 32 * 2];
-                mem_proof[0..28 * 32].copy_from_slice(instruction_proof.as_slice());
+                let mut mem_proof = vec![0; MEMORY_PROOF_SIZE * 32 * 2];
+                mem_proof[0..MEMORY_PROOF_SIZE * 32].copy_from_slice(instruction_proof.as_slice());
                 Ok::<_, anyhow::Error>(StepWitness {
                     state: self.state.encode_witness()?,
                     mem_proof,
@@ -91,7 +91,7 @@ where
 
         if proof {
             witness = witness.map(|mut wit| {
-                wit.mem_proof[28 * 32..].copy_from_slice(self.mem_proof.as_slice());
+                wit.mem_proof[MEMORY_PROOF_SIZE * 32..].copy_from_slice(self.mem_proof.as_slice());
                 if self.last_preimage_offset != u64::MAX {
                     wit.preimage_key = Some(self.last_preimage_key);
                     wit.preimage_value = Some(self.last_preimage.clone());
@@ -255,11 +255,6 @@ mod test {
             }
             ins.step(false).await.unwrap();
         }
-
-        println!("STDOUT:");
-        println!("{}", String::from_utf8(ins.std_out.buffer().to_vec()).unwrap().replace("\\n", "\n"));
-        println!("STDERR:");
-        println!("{}", String::from_utf8(ins.std_err.buffer().to_vec()).unwrap().replace("\\n", "\n"));
 
         assert!(ins.state.exited, "must exit");
         assert_eq!(ins.state.exit_code, 0, "must exit with 0");
