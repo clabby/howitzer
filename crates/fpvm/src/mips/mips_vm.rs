@@ -3,7 +3,7 @@
 use super::mips_instruction::{IType, JType, Opcode, RType, Special2Function, SpecialFunction};
 use crate::{
     memory::{page, MemoryReader},
-    types::{Address, DoubleWord, Fd, Syscall},
+    types::{Address, DoubleWord, Fd, Syscall, Word},
     utils::sign_extend,
     InstrumentedState,
 };
@@ -13,6 +13,9 @@ use std::io::{self, BufReader, Read, Write};
 
 pub(crate) const MIPS_EBADF: u64 = 0x9;
 pub(crate) const MIPS_EINVAL: u64 = 0x16;
+
+const DOUBLEWORD_MASK: DoubleWord = DoubleWord::MAX;
+const WORD_MASK: DoubleWord = Word::MAX as DoubleWord;
 
 impl<O, E, P> InstrumentedState<O, E, P>
 where
@@ -57,7 +60,7 @@ where
             return self.handle_jump(link_reg, target);
         }
 
-        // Handle branch instructions
+        // Handle branch I-type instructions
         if matches!(
             opcode,
             Opcode::BEQ | Opcode::BNE | Opcode::BLEZ | Opcode::BGTZ | Opcode::REGIMM
@@ -198,15 +201,7 @@ where
                         Some(self.execute_immediate_alu(Opcode::ADDI, rs_val, rt_val)?)
                     }
                     SpecialFunction::SUB => Some(sign_extend(rs_val - rt_val, 32)),
-                    SpecialFunction::SUBU => {
-                        println!(
-                            "SUBU: {} (rs = {:08x} | rt = {:08x})",
-                            rs_val - rt_val,
-                            rs_val,
-                            rt_val
-                        );
-                        Some(sign_extend(rs_val - rt_val, 32))
-                    }
+                    SpecialFunction::SUBU => Some(sign_extend(rs_val - rt_val, 32)),
                     SpecialFunction::AND => {
                         Some(self.execute_immediate_alu(Opcode::ANDI, rs_val, rt_val)?)
                     }
@@ -298,15 +293,7 @@ where
             // MIPS32
             Opcode::ADDI | Opcode::ADDIU => Ok(sign_extend(rs_val + rt_val, 32)),
             Opcode::SLTI => Ok(((rs_val as i64) < (rt_val as i64)) as u64),
-            Opcode::SLTIU => {
-                println!(
-                    "SLTIU: rs[{}] rt[{}] | rs<rt = {}",
-                    rs_val,
-                    rt_val,
-                    (rs_val < rt_val) as u64
-                );
-                Ok((rs_val < rt_val) as u64)
-            }
+            Opcode::SLTIU => Ok((rs_val < rt_val) as u64),
             Opcode::ANDI => Ok(rs_val & rt_val),
             Opcode::ORI => Ok(rs_val | rt_val),
             Opcode::XORI => Ok(rs_val ^ rt_val),
@@ -368,15 +355,15 @@ where
                 // Pull the bytes into the upper part of the word
                 let val = mem << sl;
                 // Create a mask for the untouched part of the dest register
-                let mask = 0xFFFFFFFFu64 >> (32 - sl);
+                let mask = WORD_MASK >> (32 - sl);
                 // Merge the values
-                let merged = (val | (rt_val & mask)) & 0xFFFFFFFF;
+                let merged = (val | (rt_val & mask)) & WORD_MASK;
                 Ok((instruction.rt as usize, None, sign_extend(merged, 32)))
             }
             Opcode::LW | Opcode::LL => Ok((
                 instruction.rt as usize,
                 None,
-                sign_extend((mem >> (32 - ((rs_val & 0x4) << 3))) & 0xFFFFFFFF, 32),
+                sign_extend((mem >> (32 - ((rs_val & 0x4) << 3))) & WORD_MASK, 32),
             )),
             Opcode::LBU => {
                 Ok((instruction.rt as usize, None, (mem >> (56 - ((rs_val & 0x7) << 3))) & 0xFF))
@@ -391,9 +378,9 @@ where
                 // Pull the bytes into the lower part of the word
                 let val = mem >> sr;
                 // Create a mask for the untouched part of the dest register
-                let mask = 0xFFFFFFFFu64 << (32 - sr);
+                let mask = WORD_MASK << (32 - sr);
                 // Merge the values
-                let merged = (val | (rt_val & mask)) & 0xFFFFFFFF;
+                let merged = (val | (rt_val & mask)) & WORD_MASK;
                 Ok((instruction.rt as usize, None, sign_extend(merged, 32)))
             }
             Opcode::SB => {
@@ -410,14 +397,14 @@ where
             }
             Opcode::SWL => {
                 let sr = (rs_val & 0x3) << 3;
-                let val = ((rt_val & 0xFFFFFFFF) >> sr) << (32 - ((rs_val & 0x4) << 3));
-                let mask = ((0xFFFFFFFFu32 >> sr) as u64) << (32 - ((rs_val & 0x4) << 3));
+                let val = ((rt_val & WORD_MASK) >> sr) << (32 - ((rs_val & 0x4) << 3));
+                let mask = ((WORD_MASK >> sr) as u64) << (32 - ((rs_val & 0x4) << 3));
                 Ok((0, Some(address), (mem & !mask) | val))
             }
             Opcode::SW | Opcode::SC => {
                 let sl = 32 - ((rs_val & 0x4) << 3);
-                let val = (rt_val & 0xFFFFFFFF) << sl;
-                let mask = 0xFFFFFFFFFFFFFFFF ^ (0xFFFFFFFF << sl);
+                let val = (rt_val & WORD_MASK) << sl;
+                let mask = DOUBLEWORD_MASK ^ (WORD_MASK << sl);
 
                 if matches!(opcode, Opcode::SC) && instruction.rt != 0 {
                     self.state.registers[instruction.rt as usize] = 1;
@@ -427,19 +414,17 @@ where
             }
             Opcode::SWR => {
                 let sl = 24 - ((rs_val & 0x3) << 3);
-                let val = ((rt_val & 0xFFFFFFFF) << sl) << (32 - ((rs_val & 0x4) << 3));
-                let mask = ((0xFFFFFFFFu32 << sl) as u64) << (32 - ((rs_val & 0x4) << 3));
+                let val = ((rt_val & WORD_MASK) << sl) << (32 - ((rs_val & 0x4) << 3));
+                let mask = (((WORD_MASK as u32) << sl) as u64) << (32 - ((rs_val & 0x4) << 3));
                 Ok((0, Some(address), (mem & !mask) | val))
             }
             // MIPS64
             Opcode::SDL => {
-                println!("SDL: {:x} {:x}", rs_val, rt_val);
                 let val = rt_val >> ((rs_val & 0x7) << 3);
                 let mask = u64::MAX >> ((rs_val & 0x7) << 3);
                 Ok((0, Some(address), (mem & !mask) | val))
             }
             Opcode::SDR => {
-                println!("SDR: {:x} {:x}", rs_val, rt_val);
                 let val = rt_val << 56 - ((rs_val & 0x7) << 3);
                 let mask = u64::MAX << (56 - ((rs_val & 0x7) << 3));
                 Ok((0, Some(address), (mem & !mask) | val))
@@ -447,7 +432,7 @@ where
             Opcode::LWU => Ok((
                 instruction.rt as usize,
                 None,
-                (mem >> (32 - ((rs_val & 0x4) << 3))) & 0xFFFFFFFF,
+                (mem >> (32 - ((rs_val & 0x4) << 3))) & WORD_MASK,
             )),
             Opcode::LD | Opcode::LLD => Ok((instruction.rt as usize, None, mem)),
             Opcode::SD | Opcode::SCD => {
@@ -498,7 +483,6 @@ where
                 }
                 Syscall::Brk => {
                     // TODO(clabby): Prob wrong for 64-bit?
-                    println!("!!!!!!!!!! BRK !!!!!!!!!!!!");
                     v0 = 0x40000000;
                 }
                 Syscall::Clone => {
@@ -515,17 +499,17 @@ where
                         // Nothing to do; Leave v0 and v1 zero, read nothing, and give no error.
                     }
                     Ok(Fd::PreimageRead) => {
-                        let effective_address = (a1 & 0xFFFFFFFFFFFFFFFC) as Address;
+                        let effective_address = (a1 & 0xFFFFFFFFFFFFFFF8) as Address;
 
                         self.track_mem_access(effective_address)?;
-                        let memory = self.state.memory.get_memory_word(effective_address)?;
+                        let memory = self.state.memory.get_memory_doubleword(effective_address)?;
 
                         let (data, mut data_len) = self
                             .read_preimage(self.state.preimage_key, self.state.preimage_offset)
                             .await?;
 
-                        let alignment = (a1 & 0x3) as usize;
-                        let space = 4 - alignment;
+                        let alignment = (a1 & 0x7) as usize;
+                        let space = 8 - alignment;
                         if space < data_len {
                             data_len = space;
                         }
@@ -535,9 +519,10 @@ where
 
                         let mut out_mem = memory.to_be_bytes();
                         out_mem[alignment..alignment + data_len].copy_from_slice(&data[..data_len]);
-                        self.state
-                            .memory
-                            .set_memory_word(effective_address, u32::from_be_bytes(out_mem))?;
+                        self.state.memory.set_memory_doubleword(
+                            effective_address,
+                            u64::from_be_bytes(out_mem),
+                        )?;
                         self.state.preimage_offset += data_len as u64;
                         v0 = data_len as DoubleWord;
                     }
@@ -594,14 +579,16 @@ where
                         v0 = a2;
                     }
                     Ok(Fd::PreimageWrite) => {
-                        let effective_address = a1 & 0xFFFFFFFFFFFFFFFC;
+                        let effective_address = a1 & 0xFFFFFFFFFFFFFFF8;
                         self.track_mem_access(effective_address as Address)?;
 
-                        let memory =
-                            self.state.memory.get_memory_word(effective_address as Address)?;
+                        let memory = self
+                            .state
+                            .memory
+                            .get_memory_doubleword(effective_address as Address)?;
                         let mut key = self.state.preimage_key;
-                        let alignment = a1 & 0x3;
-                        let space = 4 - alignment;
+                        let alignment = a1 & 0x7;
+                        let space = 8 - alignment;
 
                         if space < a2 {
                             a2 = space;

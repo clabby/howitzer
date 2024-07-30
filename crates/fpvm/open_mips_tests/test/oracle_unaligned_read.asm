@@ -53,10 +53,7 @@ $writeloop:
 # read preimage length to unaligned addr. This will read only up to the nearest aligned byte so we have to read again.
   li $a0, 5
   li $a1, 0x31000001
-  li $a2, 4
-  li $v0, 5000
-  syscall
-  li $a1, 0x31000004
+  li $a2, 8
   li $v0, 5000
   syscall
   li $a1, 0x31000008
