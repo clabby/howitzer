@@ -3,6 +3,7 @@
 //! This module contains the MIPS64-specific [Syscall] definitions and [Syscall] handling logic for
 //! the MIPS emulator.
 
+use super::def_enum;
 use crate::{
     memory::page,
     types::{Address, DoubleWord, Fd, Word},
@@ -11,8 +12,6 @@ use crate::{
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::io::{self, BufReader, Read, Write};
-
-use super::def_enum;
 
 /// https://www.cs.cmu.edu/afs/club/usr/jhutz/project/Linux/src/include/asm-mips/errno.h
 const MIPS_EBADF: u64 = 0x9;
@@ -255,7 +254,7 @@ where
             self.last_preimage[8..].copy_from_slice(&data);
         }
 
-        self.last_preimage_offset = offset;
+        self.last_preimage_offset = Some(offset);
 
         let mut data = [0u8; 32];
         let data_len =

@@ -82,3 +82,45 @@ impl State {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        types::{state_hash, State, STATE_WITNESS_SIZE},
+        utils::keccak256,
+    };
+
+    #[test]
+    fn test_state_hash() {
+        let cases = [
+            (false, 0),
+            (false, 1),
+            (false, 2),
+            (false, 3),
+            (true, 0),
+            (true, 1),
+            (true, 2),
+            (true, 3),
+        ];
+
+        for (exited, exit_code) in cases.into_iter() {
+            let mut state = State { exited, exit_code, ..Default::default() };
+
+            let actual_witness = state.encode_witness().unwrap();
+            let actual_state_hash = state_hash(actual_witness);
+            assert_eq!(actual_witness.len(), STATE_WITNESS_SIZE);
+
+            let mut expected_witness = [0u8; STATE_WITNESS_SIZE];
+            let mem_root = state.memory.merkle_root().unwrap();
+            expected_witness[..32].copy_from_slice(mem_root.as_slice());
+            expected_witness[32 * 2 + 8 * 6] = exit_code;
+            expected_witness[32 * 2 + 8 * 6 + 1] = exited as u8;
+
+            assert_eq!(actual_witness, expected_witness, "Incorrect witness");
+
+            let mut expected_state_hash = keccak256(expected_witness);
+            expected_state_hash[0] = State::vm_status(exited, exit_code) as u8;
+            assert_eq!(actual_state_hash, expected_state_hash, "Incorrect state hash");
+        }
+    }
+}

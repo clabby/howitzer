@@ -39,11 +39,6 @@ where
         let instruction = self.state.memory.get_memory_word(self.state.pc as Address)?;
         let opcode = Opcode::try_from(instruction >> 26)?;
 
-        // println!(
-        //     "Step: {}, Opcode: {:?} | Instruction: {:04x}",
-        //     self.state.step, opcode, instruction
-        // );
-
         // Handle J-type - J/JAL
         if matches!(opcode, Opcode::J | Opcode::JAL) {
             // J has no link register, only JAL.
@@ -666,12 +661,12 @@ where
     /// - A [Result] indicating if the operation was successful.
     #[inline]
     pub(crate) fn track_mem_access(&mut self, effective_address: Address) -> Result<()> {
-        if self.mem_proof_enabled && self.last_mem_access != effective_address {
-            if self.last_mem_access != Address::MAX {
-                anyhow::bail!("Unexpected diffrent memory access at {:x}, already have access at {:x} buffered", effective_address, self.last_mem_access);
-            }
-
-            self.last_mem_access = effective_address;
+        if self.mem_proof_enabled && self.last_mem_access != Some(effective_address) {
+            anyhow::ensure!(
+                self.last_mem_access.is_none(),
+                "Unexpected last memory access with existing access buffered."
+            );
+            self.last_mem_access = Some(effective_address);
             self.mem_proof = self.state.memory.merkle_proof(effective_address)?;
         }
         Ok(())

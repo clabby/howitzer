@@ -2,7 +2,7 @@
 
 use crate::{
     memory::MEMORY_PROOF_SIZE,
-    types::{Address, State, StepWitness},
+    types::{Address, DoubleWord, State, StepWitness},
 };
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
@@ -25,7 +25,7 @@ where
     /// The MIPS thread context's stderr buffer.
     pub(crate) std_err: BufWriter<E>,
     /// The last address we accessed in memory.
-    pub(crate) last_mem_access: Address,
+    pub(crate) last_mem_access: Option<Address>,
     /// Whether or not the memory proof generation is enabled.
     pub(crate) mem_proof_enabled: bool,
     /// The memory proof, if it is enabled.
@@ -38,7 +38,7 @@ where
     pub(crate) last_preimage_key: [u8; 32],
     /// The offset we last read from, or max u64 if nothing is read at
     /// the current step.
-    pub(crate) last_preimage_offset: u64,
+    pub(crate) last_preimage_offset: Option<DoubleWord>,
 }
 
 impl<O, E, P> InstrumentedState<O, E, P>
@@ -52,13 +52,13 @@ where
             state,
             std_out: BufWriter::new(std_out),
             std_err: BufWriter::new(std_err),
-            last_mem_access: 0,
+            last_mem_access: None,
             mem_proof_enabled: false,
             mem_proof: [0u8; MEMORY_PROOF_SIZE * 32],
             preimage_oracle: oracle,
             last_preimage: Vec::default(),
             last_preimage_key: [0u8; 32],
-            last_preimage_offset: 0,
+            last_preimage_offset: None,
         }
     }
 
@@ -67,12 +67,14 @@ where
     /// ### Returns
     /// - Ok(Some(witness)): The [StepWitness] for the current
     /// - Err(_): An error occurred while processing the instruction step in the MIPS emulator.
-    #[inline(always)]
     pub async fn step(&mut self, proof: bool) -> Result<Option<StepWitness>> {
+        // Reset witness generation parameters
         self.mem_proof_enabled = proof;
-        self.last_mem_access = !0u64 as Address;
-        self.last_preimage_offset = !0u64;
+        self.last_mem_access = None;
+        self.last_preimage_offset = None;
 
+        // Formulate the state witness as well as the instruction proof prior to performing the
+        // state transition.
         let mut witness = proof
             .then(|| {
                 let instruction_proof = self.state.memory.merkle_proof(self.state.pc as Address)?;
@@ -87,15 +89,18 @@ where
             })
             .transpose()?;
 
+        // Perform the state transition.
         self.inner_step().await?;
 
+        // Update the witness with the memory access proof and preimage data, if there was a
+        // preimage read within the state transition.
         if proof {
             witness = witness.map(|mut wit| {
                 wit.mem_proof[MEMORY_PROOF_SIZE * 32..].copy_from_slice(self.mem_proof.as_slice());
-                if self.last_preimage_offset != u64::MAX {
+                if self.last_preimage_offset.is_some() {
                     wit.preimage_key = Some(self.last_preimage_key);
                     wit.preimage_value = Some(self.last_preimage.clone());
-                    wit.preimage_offset = Some(self.last_preimage_offset);
+                    wit.preimage_offset = self.last_preimage_offset;
                 }
                 wit
             })
@@ -104,12 +109,12 @@ where
         Ok(witness)
     }
 
-    /// Returns the stdout buffer.
+    /// Returns a reference the stdout buffer.
     pub fn std_out(&self) -> &[u8] {
         self.std_out.buffer()
     }
 
-    /// Returns the stderr buffer.
+    /// Returns a reference the stderr buffer.
     pub fn std_err(&self) -> &[u8] {
         self.std_err.buffer()
     }
@@ -117,113 +122,73 @@ where
 
 #[cfg(test)]
 mod test {
-    use alloy_primitives::keccak256;
-    use elf::{endian::AnyEndian, ElfBytes};
-
     use crate::{
         test_utils::{ClaimTestOracle, StaticOracle, BASE_ADDR_END, END_ADDR},
-        types::{state_hash, Address, State, STATE_WITNESS_SIZE},
+        types::{Address, State},
         utils::{
             meta::Meta,
             patch::{load_elf, patch_go, patch_stack},
         },
         InstrumentedState,
     };
+    use elf::{endian::AnyEndian, ElfBytes};
     use std::{
         fs,
         io::{self, BufReader, BufWriter},
     };
 
-    mod open_mips {
-        use super::*;
+    #[tokio::test]
+    async fn open_mips_tests() {
+        let tests_path =
+            std::env::current_dir().unwrap().join("open_mips_tests").join("test").join("bin");
+        let test_files = fs::read_dir(tests_path).unwrap().flatten();
 
-        #[tokio::test]
-        async fn open_mips_tests() {
-            let tests_path =
-                std::env::current_dir().unwrap().join("open_mips_tests").join("test").join("bin");
-            let test_files = fs::read_dir(tests_path).unwrap().flatten();
+        for f in test_files.into_iter() {
+            let file_name = String::from(f.file_name().to_str().unwrap());
 
-            for f in test_files.into_iter() {
-                let file_name = String::from(f.file_name().to_str().unwrap());
+            // Short circuit early for `exit_group.bin`
+            let exit_group = file_name == "exit_group.bin";
 
-                // Short circuit early for `exit_group.bin`
-                let exit_group = file_name == "exit_group.bin";
+            let program_mem = fs::read(f.path()).unwrap();
 
-                let program_mem = fs::read(f.path()).unwrap();
+            let mut state = State { pc: 0, next_pc: 4, ..Default::default() };
+            state.memory.set_memory_range(0, BufReader::new(program_mem.as_slice())).unwrap();
 
-                let mut state = State { pc: 0, next_pc: 4, ..Default::default() };
-                state.memory.set_memory_range(0, BufReader::new(program_mem.as_slice())).unwrap();
+            // Set the return address ($ra) to jump into when the test completes.
+            state.registers[31] = END_ADDR;
 
-                // Set the return address ($ra) to jump into when the test completes.
-                state.registers[31] = END_ADDR;
+            let mut ins = InstrumentedState::new(
+                state,
+                StaticOracle::new(b"hello world".to_vec()),
+                io::stdout(),
+                io::stderr(),
+            );
 
-                let mut ins = InstrumentedState::new(
-                    state,
-                    StaticOracle::new(b"hello world".to_vec()),
-                    io::stdout(),
-                    io::stderr(),
-                );
-
-                for _ in 0..1000 {
-                    if ins.state.pc == END_ADDR {
-                        break;
-                    }
-                    if exit_group && ins.state.exited {
-                        break;
-                    }
-                    ins.step(false).await.unwrap();
+            for _ in 0..1000 {
+                if ins.state.pc == END_ADDR {
+                    break;
                 }
-
-                if exit_group {
-                    assert_ne!(END_ADDR, ins.state.pc, "must not reach end");
-                    assert!(ins.state.exited, "must exit");
-                    assert_eq!(1, ins.state.exit_code, "must exit with 1");
-                } else {
-                    assert_eq!(END_ADDR, ins.state.pc, "must reach end");
-                    let mut state = ins.state.memory;
-                    let (done, result) = (
-                        state.get_memory_word((BASE_ADDR_END + 4) as Address).unwrap(),
-                        state.get_memory_word((BASE_ADDR_END + 8) as Address).unwrap(),
-                    );
-                    assert_eq!(done, 1, "must set done to 1 {:?}", f.file_name());
-                    assert_eq!(result, 1, "must have success result {:?}", f.file_name());
-                    println!("Test passed: {:?}", f.file_name());
+                if exit_group && ins.state.exited {
+                    break;
                 }
+                ins.step(false).await.unwrap();
             }
-        }
-    }
 
-    #[test]
-    fn test_state_hash() {
-        let cases = [
-            (false, 0),
-            (false, 1),
-            (false, 2),
-            (false, 3),
-            (true, 0),
-            (true, 1),
-            (true, 2),
-            (true, 3),
-        ];
-
-        for (exited, exit_code) in cases.into_iter() {
-            let mut state = State { exited, exit_code, ..Default::default() };
-
-            let actual_witness = state.encode_witness().unwrap();
-            let actual_state_hash = state_hash(actual_witness);
-            assert_eq!(actual_witness.len(), STATE_WITNESS_SIZE);
-
-            let mut expected_witness = [0u8; STATE_WITNESS_SIZE];
-            let mem_root = state.memory.merkle_root().unwrap();
-            expected_witness[..32].copy_from_slice(mem_root.as_slice());
-            expected_witness[32 * 2 + 8 * 6] = exit_code;
-            expected_witness[32 * 2 + 8 * 6 + 1] = exited as u8;
-
-            assert_eq!(actual_witness, expected_witness, "Incorrect witness");
-
-            let mut expected_state_hash = keccak256(expected_witness);
-            expected_state_hash[0] = State::vm_status(exited, exit_code) as u8;
-            assert_eq!(actual_state_hash, expected_state_hash, "Incorrect state hash");
+            if exit_group {
+                assert_ne!(END_ADDR, ins.state.pc, "must not reach end");
+                assert!(ins.state.exited, "must exit");
+                assert_eq!(1, ins.state.exit_code, "must exit with 1");
+            } else {
+                assert_eq!(END_ADDR, ins.state.pc, "must reach end");
+                let mut state = ins.state.memory;
+                let (done, result) = (
+                    state.get_memory_word((BASE_ADDR_END + 4) as Address).unwrap(),
+                    state.get_memory_word((BASE_ADDR_END + 8) as Address).unwrap(),
+                );
+                assert_eq!(done, 1, "must set done to 1 {:?}", f.file_name());
+                assert_eq!(result, 1, "must have success result {:?}", f.file_name());
+                println!("Test passed: {:?}", f.file_name());
+            }
         }
     }
 
