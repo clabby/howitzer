@@ -752,19 +752,17 @@ where
                 0
             }
             SpecialFunction::DIV => {
-                // div
-                self.state.hi =
-                    sign_extend((rs as i32).checked_rem(rt as i32).unwrap_or_default() as u64, 32);
-                self.state.lo =
-                    sign_extend((rs as i32).checked_div(rt as i32).unwrap_or_default() as u64, 32);
+                anyhow::ensure!(rt > 0, "TRAP: Division by zero");
+
+                self.state.hi = sign_extend(((rs as i32) % (rt as i32)) as u64, 32);
+                self.state.lo = sign_extend(((rs as i32) / (rt as i32)) as u64, 32);
                 0
             }
             SpecialFunction::DIVU => {
-                // divu
-                self.state.hi =
-                    sign_extend((rs as u32).checked_rem(rt as u32).unwrap_or_default() as u64, 32);
-                self.state.lo =
-                    sign_extend((rs as u32).checked_div(rt as u32).unwrap_or_default() as u64, 32);
+                anyhow::ensure!(rt > 0, "TRAP: Division by zero");
+
+                self.state.hi = ((rs as u32) % (rt as u32)) as u64;
+                self.state.lo = ((rs as u32) / (rt as u32)) as u64;
                 0
             }
             // MIPS64
@@ -777,15 +775,17 @@ where
                 0
             }
             SpecialFunction::DDIV => {
-                // ddiv
-                self.state.hi = (rs as i64).checked_rem(rt as i64).unwrap_or_default() as u64;
-                self.state.lo = (rs as i64).checked_div(rt as i64).unwrap_or_default() as u64;
+                anyhow::ensure!(rt > 0, "TRAP: Division by zero");
+
+                self.state.hi = ((rs as i64) % (rt as i64)) as u64;
+                self.state.lo = ((rs as i64) / (rt as i64)) as u64;
                 0
             }
             SpecialFunction::DDIVU => {
-                // ddivu
-                self.state.hi = rs.checked_rem(rt).unwrap_or_default();
-                self.state.lo = rs.checked_div(rt).unwrap_or_default();
+                anyhow::ensure!(rt > 0, "TRAP: Division by zero");
+
+                self.state.hi = rs % rt;
+                self.state.lo = rs / rt;
                 0
             }
             _ => 0,
