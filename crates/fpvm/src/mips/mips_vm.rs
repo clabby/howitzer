@@ -145,11 +145,16 @@ where
                         (rt_val & 0xFFFFFFFF) >> instruction.shamt,
                         32 - instruction.shamt as u64,
                     )),
-                    SpecialFunction::SLLV => Some(sign_extend((rt_val & 0xFFFFFFFF) << rs_val, 32)),
-                    SpecialFunction::SRLV => Some(sign_extend((rt_val & 0xFFFFFFFF) >> rs_val, 32)),
-                    SpecialFunction::SRAV => {
-                        Some(sign_extend((rt_val & 0xFFFFFFFF) >> rs_val, 32 - rs_val as u64))
+                    SpecialFunction::SLLV => {
+                        Some(sign_extend((rt_val & 0xFFFFFFFF) << (rs_val & 0x1F), 32))
                     }
+                    SpecialFunction::SRLV => {
+                        Some(sign_extend((rt_val & 0xFFFFFFFF) >> (rs_val & 0x1F), 32))
+                    }
+                    SpecialFunction::SRAV => Some(sign_extend(
+                        ((rt_val & 0xFFFFFFFF) as i32 >> (rs_val & 0x1F)) as u64,
+                        32 - rs_val as u64,
+                    )),
                     SpecialFunction::JR | SpecialFunction::JALR => {
                         let link_reg = if matches!(funct, SpecialFunction::JALR) {
                             instruction.rd as usize
@@ -204,17 +209,18 @@ where
                         Some(self.execute_immediate_alu(Opcode::XORI, rs_val, rt_val)?)
                     }
                     SpecialFunction::NOR => Some(!(rs_val | rt_val)),
-                    SpecialFunction::SLTI => {
-                        Some(((rs_val as i32) < (rt_val as i32)) as DoubleWord)
+                    SpecialFunction::SLT => {
+                        Some(((rs_val as i64) < (rt_val as i64)) as DoubleWord)
                     }
-                    SpecialFunction::SLTIU => {
-                        Some(((rs_val as u32) < (rt_val as u32)) as DoubleWord)
+                    SpecialFunction::SLTU => {
+                        Some((rs_val < rt_val) as DoubleWord)
                     }
 
                     // MIPS64
-                    SpecialFunction::DSLLV => Some(rt_val << rs_val),
-                    SpecialFunction::DSRLV => Some(rt_val >> rs_val),
-                    SpecialFunction::DMULTU | SpecialFunction::DDIVU => {
+                    SpecialFunction::DSLLV => Some(rt_val << (rs_val & 0x3F)),
+                    SpecialFunction::DSRLV => Some(rt_val >> (rs_val & 0x3F)),
+                    SpecialFunction::DSRAV => Some(((rt_val as i64) >> (rs_val & 0x3F)) as u64),
+                    SpecialFunction::DMULTU | SpecialFunction::DDIVU | SpecialFunction::DDIV => {
                         self.handle_hi_lo(funct, rs_val, rt_val, instruction.rd as usize)?;
                         None
                     }
@@ -286,8 +292,8 @@ where
         match opcode {
             // MIPS32
             Opcode::ADDI | Opcode::ADDIU => Ok(sign_extend(rs_val + rt_val, 32)),
-            Opcode::SLTI => Ok(((rs_val as i32) < (rt_val as i32)) as u64),
-            Opcode::SLTIU => Ok(((rs_val as u32) < (rt_val as u32)) as u64),
+            Opcode::SLTI => Ok(((rs_val as i64) < (rt_val as i64)) as u64),
+            Opcode::SLTIU => Ok((rs_val < rt_val) as u64),
             Opcode::ANDI => Ok(rs_val & rt_val),
             Opcode::ORI => Ok(rs_val | rt_val),
             Opcode::XORI => Ok(rs_val ^ rt_val),
@@ -428,7 +434,7 @@ where
                     self.state.registers[instruction.rt as usize] = 1;
                 }
 
-                Ok((0, Some(address), (mem & !mask) | (val & mask)))
+                Ok((0, Some(address), (mem & !mask) | val))
             }
             _ => anyhow::bail!("Invalid opcode {:?}", opcode),
         }
@@ -466,6 +472,8 @@ where
                     }
                 }
                 Syscall::Brk => {
+                    // TODO(clabby): Prob wrong for 64-bit?
+                    println!("!!!!!!!!!! BRK !!!!!!!!!!!!");
                     v0 = 0x40000000;
                 }
                 Syscall::Clone => {
@@ -670,7 +678,7 @@ where
 
         if should_branch {
             self.state.next_pc =
-                prev_pc + 4 + (sign_extend((instruction.imm << 2) as DoubleWord, 16));
+                prev_pc + 4 + (sign_extend(instruction.imm as DoubleWord, 16) << 2);
         } else {
             // Branch not taken; proceed as normal.
             self.state.next_pc += 4;
@@ -754,6 +762,12 @@ where
 
                 self.state.hi = (acc >> 64) as u64;
                 self.state.lo = acc as u64;
+                0
+            }
+            SpecialFunction::DDIV => {
+                // ddiv
+                self.state.hi = (rs as i64).checked_rem(rt as i64).unwrap_or_default() as u64;
+                self.state.lo = (rs as i64).checked_div(rt as i64).unwrap_or_default() as u64;
                 0
             }
             SpecialFunction::DDIVU => {

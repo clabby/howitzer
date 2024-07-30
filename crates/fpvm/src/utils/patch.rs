@@ -41,7 +41,7 @@ pub fn load_elf(raw: &[u8]) -> Result<State> {
     let mut state = State {
         pc: elf.ehdr.e_entry,
         next_pc: elf.ehdr.e_entry + 4,
-        heap: 0x20000000u64,
+        heap: 0x10_00_00_00_00_00_00_00u64,
         ..Default::default()
     };
 
