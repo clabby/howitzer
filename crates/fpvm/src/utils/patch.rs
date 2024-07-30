@@ -39,9 +39,9 @@ pub fn load_elf(raw: &[u8]) -> Result<State> {
     let elf = ElfBytes::<AnyEndian>::minimal_parse(raw)?;
 
     let mut state = State {
-        pc: elf.ehdr.e_entry as u32,
-        next_pc: elf.ehdr.e_entry as u32 + 4,
-        heap: 0x05000000,
+        pc: elf.ehdr.e_entry,
+        next_pc: elf.ehdr.e_entry + 4,
+        heap: 0x10_00_00_00_00_00_00_00u64,
         ..Default::default()
     };
 
@@ -80,9 +80,9 @@ pub fn load_elf(raw: &[u8]) -> Result<State> {
             }
         }
 
-        if header.p_vaddr + header.p_memsz >= 1 << 32 {
+        if header.p_vaddr + header.p_memsz >= 1 << 47 {
             anyhow::bail!(
-                "Program segment {} out of 32-bit mem range: {} - {} (size: {})",
+                "Program segment {} out of 64-bit mem range: {} - {} (size: {})",
                 i,
                 header.p_vaddr,
                 header.p_vaddr + header.p_memsz,
@@ -90,13 +90,13 @@ pub fn load_elf(raw: &[u8]) -> Result<State> {
             );
         }
 
-        state.memory.set_memory_range(header.p_vaddr as u32, reader)?;
+        state.memory.set_memory_range(header.p_vaddr, reader)?;
     }
 
     Ok(state)
 }
 
-/// Patch a Go ELF file to work with the Howitzer FPVM.
+/// Patch a Go ELF file to work with mipsevm.
 ///
 /// ### Takes
 /// - `elf`: The ELF file to patch
@@ -119,12 +119,12 @@ pub fn patch_go(raw: &[u8], state: &mut State) -> Result<()> {
             // 03e00008 = jr $ra = ret (pseudo instruction)
             // 00000000 = nop (executes with delay-slot, but does nothing)
             state.memory.set_memory_range(
-                symbol.st_value as u32,
+                symbol.st_value,
                 [0x03, 0xe0, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00].as_slice(),
             )?;
         } else if name == "runtime.MemProfileRate" {
             // disable mem profiling, to avoid a lot of unnecessary floating point ops
-            state.memory.set_memory(symbol.st_value as u32, 0)?;
+            state.memory.set_memory_doubleword(symbol.st_value, 0)?;
         }
     }
     Ok(())
@@ -140,39 +140,37 @@ pub fn patch_go(raw: &[u8], state: &mut State) -> Result<()> {
 /// - `Err(_)` if the patch failed
 pub fn patch_stack(state: &mut State) -> Result<()> {
     // Setup stack pointer
-    let ptr = 0x7F_FF_D0_00_u32;
+    let ptr = 0x7F_FF_FF_FF_D0_00_u64;
 
     // Allocate 1 page for the initial stack data, and 16KB = 4 pages for the stack to grow.
     state.memory.set_memory_range(
-        ptr - 4 * page::PAGE_SIZE as u32,
+        ptr - 8 * page::PAGE_SIZE as u64,
         [0u8; page::PAGE_SIZE * 5].as_slice(),
     )?;
     state.registers[29] = ptr;
 
     #[inline(always)]
-    fn store_mem(st: &mut State, address: Address, value: u32) -> Result<()> {
-        st.memory.set_memory(address, value)
+    fn store_mem(st: &mut State, address: Address, value: u64) -> Result<()> {
+        st.memory.set_memory_doubleword(address, value)
     }
 
-    // init argc, argv, aux on stack
-    store_mem(state, ptr + 4, 0x42)?; // argc = 0 (argument count)
-    store_mem(state, ptr + 4 * 2, 0x35)?; // argv[n] = 0 (terminating argv)
-    store_mem(state, ptr + 4 * 3, 0)?; // envp[term] = 0 (no env vars)
-    store_mem(state, ptr + 4 * 4, 6)?; // auxv[0] = _AT_PAGESZ = 6 (key)
-    store_mem(state, ptr + 4 * 5, 4096)?; // auxv[1] = page size of 4 KiB (value) - (== minPhysPageSize)
-    store_mem(state, ptr + 4 * 6, 25)?; // auxv[2] = AT_RANDOM
-    store_mem(state, ptr + 4 * 7, ptr + 4 * 9)?; // auxv[3] = address of 16 bytes containing random value
-    store_mem(state, ptr + 4 * 8, 0)?; // auxv[term] = 0
-
-    // 16 bytes of "randomness"
-    state.memory.set_memory_range(ptr + 4 * 9, b"4;byfairdiceroll".as_slice())?;
+    store_mem(state, ptr + 8, 0x42)?; // argc = 0 (argument count)
+    store_mem(state, ptr + 8 * 2, 0x35)?; // argv[n] = 0 (terminating argv)
+    store_mem(state, ptr + 8 * 3, 0)?; // envp[term] = 0 (no env vars)
+    store_mem(state, ptr + 8 * 4, 6)?; // auxv[0] = _AT_PAGESZ = 6 (key)
+    store_mem(state, ptr + 8 * 5, 4096)?; // auxv[1] = page size of 4 KiB (value) - (== minPhysPageSize)
+    store_mem(state, ptr + 8 * 6, 25)?; // auxv[2] = AT_RANDOM
+    store_mem(state, ptr + 8 * 7, ptr + 8 * 9)?; // auxv[3] = address of 16 bytes
+    store_mem(state, ptr + 8 * 8, 0)?; // auxv[term] = 0
+    store_mem(state, ptr + 8 * 9, 0x6f727020646e6172)?; // randomness 8/16
+    store_mem(state, ptr + 8 * 10, 0x6164626d616c6f74)?; // randomness 8/16
 
     Ok(())
 }
 
 /// A multi reader is a reader that reads from the first reader until it returns 0, then reads from
 /// the second reader.
-struct MultiReader<R1: Read, R2: Read>(R1, R2);
+pub struct MultiReader<R1: Read, R2: Read>(R1, R2);
 
 impl<R1: Read, R2: Read> Read for MultiReader<R1, R2> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {

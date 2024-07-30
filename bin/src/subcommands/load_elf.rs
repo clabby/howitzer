@@ -3,12 +3,12 @@
 use super::HowitzerSubcommandDispatcher;
 use alloy_primitives::B256;
 use anyhow::Result;
-use howitzer_kernel::gz::compress_bytes;
+use clap::Args;
 use howitzer_fpvm::{
     types::state_hash,
     utils::patch::{load_elf, patch_go, patch_stack},
 };
-use clap::Args;
+use howitzer_kernel::gz::compress_bytes;
 use std::{
     fmt::Display,
     fs::File,

@@ -1,9 +1,12 @@
 //! This module contains the data structure for a [Page] within the MIPS emulator's [Memory].
+//!
+//! [Memory]: crate::Memory
 
 use crate::{
     types::{Address, Gindex, Page},
     utils::keccak_concat_hashes,
 };
+use alloy_primitives::B256;
 use anyhow::Result;
 use once_cell::sync::Lazy;
 
@@ -11,7 +14,7 @@ use once_cell::sync::Lazy;
 use crate::utils::keccak256;
 
 pub(crate) const PAGE_ADDRESS_SIZE: usize = 12;
-pub(crate) const PAGE_KEY_SIZE: usize = 32 - PAGE_ADDRESS_SIZE;
+pub(crate) const PAGE_KEY_SIZE: usize = 64 - PAGE_ADDRESS_SIZE;
 pub(crate) const PAGE_SIZE: usize = 1 << PAGE_ADDRESS_SIZE;
 pub(crate) const PAGE_SIZE_WORDS: usize = PAGE_SIZE >> 5;
 pub(crate) const PAGE_ADDRESS_MASK: usize = PAGE_SIZE - 1;
@@ -19,20 +22,20 @@ pub(crate) const MAX_PAGE_COUNT: usize = 1 << PAGE_KEY_SIZE;
 pub(crate) const PAGE_KEY_MASK: usize = MAX_PAGE_COUNT - 1;
 
 /// Precomputed hashes of each full-zero range sub-tree level.
-pub(crate) static ZERO_HASHES: Lazy<[[u8; 32]; 256]> = Lazy::new(|| {
-    let mut out = [[0u8; 32]; 256];
+pub(crate) static ZERO_HASHES: Lazy<[B256; 256]> = Lazy::new(|| {
+    let mut out = [B256::ZERO; 256];
     for i in 1..256 {
-        out[i] = *keccak_concat_hashes(out[i - 1], out[i - 1])
+        out[i] = keccak_concat_hashes(out[i - 1], out[i - 1])
     }
     out
 });
 
 /// Precomputed cache of a merkleized page with all zero data.
-pub(crate) static DEFAULT_CACHE: Lazy<[[u8; 32]; PAGE_SIZE_WORDS]> = Lazy::new(|| {
+pub(crate) static DEFAULT_CACHE: Lazy<[B256; PAGE_SIZE_WORDS]> = Lazy::new(|| {
     let mut page = CachedPage {
         data: [0; PAGE_SIZE],
-        cache: [[0; 32]; PAGE_SIZE_WORDS],
-        valid: [false; PAGE_SIZE / 32],
+        cache: [B256::ZERO; PAGE_SIZE_WORDS],
+        valid: [false; PAGE_SIZE_WORDS],
     };
     page.merkle_root().unwrap();
     page.cache
@@ -43,14 +46,14 @@ pub(crate) static DEFAULT_CACHE: Lazy<[[u8; 32]; PAGE_SIZE_WORDS]> = Lazy::new(|
 pub struct CachedPage {
     pub data: Page,
     /// Storage for intermediate nodes
-    pub cache: [[u8; 32]; PAGE_SIZE_WORDS],
+    pub cache: [B256; PAGE_SIZE_WORDS],
     /// Bitmap for 128 nodes. 1 if valid, 0 if invalid.
-    pub valid: [bool; PAGE_SIZE / 32],
+    pub valid: [bool; PAGE_SIZE_WORDS],
 }
 
 impl Default for CachedPage {
     fn default() -> Self {
-        Self { data: [0; PAGE_SIZE], cache: *DEFAULT_CACHE, valid: [true; PAGE_SIZE / 32] }
+        Self { data: [0; PAGE_SIZE], cache: *DEFAULT_CACHE, valid: [true; PAGE_SIZE_WORDS] }
     }
 }
 
@@ -82,7 +85,7 @@ impl CachedPage {
     /// This is equivalent to calling `invalidate` on every address in the page.
     #[inline(always)]
     pub fn invalidate_full(&mut self) {
-        self.valid = [false; PAGE_SIZE / 32];
+        self.valid = [false; PAGE_SIZE_WORDS];
     }
 
     /// Compute the merkle root of the [Page].
@@ -90,7 +93,7 @@ impl CachedPage {
     /// ## Returns
     /// - The 32 byte merkle root hash of the [Page].
     #[inline(always)]
-    pub fn merkle_root(&mut self) -> Result<[u8; 32]> {
+    pub fn merkle_root(&mut self) -> Result<B256> {
         self.merkleize_subtree(1)
     }
 
@@ -103,7 +106,7 @@ impl CachedPage {
     /// - A [Result] containing the 32 byte merkle root hash of the subtree or an error if the
     ///   generalized index is too deep.
     #[inline(always)]
-    pub fn merkleize_subtree(&mut self, g_index: Gindex) -> Result<[u8; 32]> {
+    pub fn merkleize_subtree(&mut self, g_index: Gindex) -> Result<B256> {
         // Cast to usize to avoid `as usize` everywhere.
         let g_index = g_index as usize;
 
@@ -121,23 +124,23 @@ impl CachedPage {
             let data_idx = (g_index - (PAGE_SIZE_WORDS >> 1)) << 6;
             #[cfg(feature = "simd-keccak")]
             {
-                let mut out = [0u8; 32];
+                let mut out = B256::ZERO;
                 keccak256_aarch64_simd::simd_keccak256_64b_single(
                     &self.data[data_idx..data_idx + 64],
-                    &mut out,
+                    out.as_mut_slice(),
                 );
                 out
             }
 
             #[cfg(not(feature = "simd-keccak"))]
-            *keccak256(&self.data[data_idx..data_idx + 64])
+            keccak256(&self.data[data_idx..data_idx + 64])
         } else {
             // This is an internal node.
             let left_child = g_index << 1;
             let right_child = left_child + 1;
 
             // Ensure children are hashed.
-            *keccak_concat_hashes(
+            keccak_concat_hashes(
                 self.merkleize_subtree(left_child as Gindex)?,
                 self.merkleize_subtree(right_child as Gindex)?,
             )
@@ -160,7 +163,7 @@ mod test {
 
         let g_index = ((1 << PAGE_ADDRESS_SIZE) | 42) >> 5;
         let node = page.merkleize_subtree(g_index).unwrap();
-        let mut expected_leaf = [0u8; 32];
+        let mut expected_leaf = B256::ZERO;
         expected_leaf[10] = 0xab;
         assert_eq!(node, expected_leaf, "Leaf nodes should not be hashed");
 
@@ -169,7 +172,7 @@ mod test {
         assert_eq!(node, expected_parent, "Parent should be correct");
 
         let node = page.merkleize_subtree(g_index >> 2).unwrap();
-        let expected_grandparent = keccak_concat_hashes(expected_parent.into(), ZERO_HASHES[1]);
+        let expected_grandparent = keccak_concat_hashes(expected_parent, ZERO_HASHES[1]);
         assert_eq!(node, expected_grandparent, "Grandparent should be correct");
 
         let pre = page.merkle_root().unwrap();

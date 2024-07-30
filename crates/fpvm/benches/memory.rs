@@ -1,5 +1,5 @@
-use howitzer_fpvm::Memory;
 use criterion::{criterion_group, criterion_main, Criterion};
+use howitzer_fpvm::Memory;
 use pprof::criterion::{Output, PProfProfiler};
 use rand::RngCore;
 

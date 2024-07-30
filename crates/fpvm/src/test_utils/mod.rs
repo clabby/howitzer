@@ -1,7 +1,7 @@
 //! Testing utilities.
 
 use crate::utils::{concat_fixed, keccak256};
-use alloy_primitives::hex;
+use alloy_primitives::{hex, B512};
 use anyhow::Result;
 use async_trait::async_trait;
 use kona_preimage::{HintRouter, PreimageFetcher, PreimageKey, PreimageKeyType};
@@ -10,10 +10,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Used in tests to write the results to
-pub const BASE_ADDR_END: u32 = 0xBF_FF_FF_F0;
+pub const BASE_ADDR_END: u64 = 0xFF_FF_FF_FF_BF_FF_FF_F0;
 
 /// Used as the return-address for tests
-pub const END_ADDR: u32 = 0xA7_EF_00_D0;
+pub const END_ADDR: u64 = 0xA7_EF_00_D0;
 
 #[derive(Default)]
 pub struct StaticOracle {
@@ -51,11 +51,8 @@ impl ClaimTestOracle {
     pub(crate) const B: u64 = 4;
 
     #[inline(always)]
-    pub fn diff() -> [u8; 64] {
-        concat_fixed(
-            keccak256(Self::A.to_be_bytes()).into(),
-            keccak256(Self::B.to_be_bytes()).into(),
-        )
+    pub fn diff() -> B512 {
+        concat_fixed(keccak256(Self::A.to_be_bytes()), keccak256(Self::B.to_be_bytes()))
     }
 
     #[inline(always)]

@@ -1,9 +1,9 @@
+use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 use howitzer_fpvm::{
     test_utils::{ClaimTestOracle, StaticOracle},
     utils::patch::{load_elf, patch_go, patch_stack},
     InstrumentedState,
 };
-use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 use kona_preimage::{HintRouter, PreimageFetcher};
 use pprof::criterion::{Output, PProfProfiler};
 use std::{io::BufWriter, sync::Arc};
