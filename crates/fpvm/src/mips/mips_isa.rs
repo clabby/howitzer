@@ -257,13 +257,17 @@ mod test {
 
     #[test]
     fn decode_j_type() {
+        #[allow(clippy::unusual_byte_groupings)]
         let example_j_type = 0b010101_10101010101010101010101010;
+
         assert_eq!(JType::decode(example_j_type).unwrap().address, 0b10101010101010101010101010);
     }
 
     #[test]
     fn decode_r_type() {
+        #[allow(clippy::unusual_byte_groupings)]
         let example_r_type = 0b000000_00001_00010_00011_00100_000101;
+
         let r_type = RType::decode(example_r_type).unwrap();
         assert_eq!(r_type.rs, 0b00001);
         assert_eq!(r_type.rt, 0b00010);
@@ -274,9 +278,10 @@ mod test {
 
     #[test]
     fn decode_i_type() {
+        #[allow(clippy::unusual_byte_groupings)]
         let example_i_type = 0b010111_11111_00001_1111111111111111;
-        let i_type = IType::decode(example_i_type).unwrap();
 
+        let i_type = IType::decode(example_i_type).unwrap();
         assert_eq!(i_type.rs, 0b11111);
         assert_eq!(i_type.rt, 0b00001);
         assert_eq!(i_type.imm, 0b1111111111111111);
