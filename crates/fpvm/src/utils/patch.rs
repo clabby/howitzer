@@ -1,8 +1,8 @@
 //! This module contains utilities for loading ELF files into [State] objects.
 
 use crate::{
-    memory::page,
-    types::{Address, State},
+    memory::{page, Address},
+    state::State,
 };
 use anyhow::Result;
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};

@@ -1,6 +1,6 @@
 //! This module contains the types for the `howitzer` interface.
 
-use howitzer_fpvm::types::StateWitness;
+use howitzer_fpvm::state::StateWitness;
 use serde::{Deserialize, Serialize};
 
 /// The [Proof] struct contains the data for a Howitzer proof at a given instruction.

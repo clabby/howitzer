@@ -1,11 +1,34 @@
 //! This module contains the data structure for the state of the MIPS emulator.
 
-use crate::{
-    types::{StateWitness, VMStatus, STATE_WITNESS_SIZE},
-    Memory,
-};
+use crate::{memory::Memory, utils::keccak256};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+/// The size of an encoded [StateWitness] in bytes.
+pub const STATE_WITNESS_SIZE: usize = 378;
+
+/// A [StateWitness] is an encoded commitment to the current [crate::State] of the MIPS emulator.
+pub type StateWitness = [u8; STATE_WITNESS_SIZE];
+
+/// Compute the hash of the [StateWitness]
+pub fn state_hash(witness: StateWitness) -> [u8; 32] {
+    let mut hash = keccak256(witness);
+    let offset = 32 * 2 + 8 * 6;
+    let exit_code = witness[offset];
+    let exited = witness[offset + 1] == 1;
+    hash[0] = State::vm_status(exited, exit_code) as u8;
+    *hash
+}
+
+/// The [VMStatus] is an indicator within the [StateWitness] hash that indicates
+/// the current status of the MIPS emulator.
+#[repr(u8)]
+pub enum VMStatus {
+    Valid = 0,
+    Invalid = 1,
+    Panic = 2,
+    Unfinished = 3,
+}
 
 /// The [State] struct contains the internal model of the MIPS emulator state.
 ///
@@ -86,7 +109,7 @@ impl State {
 #[cfg(test)]
 mod test {
     use crate::{
-        types::{state_hash, State, STATE_WITNESS_SIZE},
+        state::{state_hash, State, STATE_WITNESS_SIZE},
         utils::keccak256,
     };
 

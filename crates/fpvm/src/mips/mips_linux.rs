@@ -3,11 +3,13 @@
 //! This module contains the MIPS64-specific [Syscall] definitions and [Syscall] handling logic for
 //! the MIPS emulator.
 
-use super::def_enum;
+use super::{
+    def_enum,
+    mips_isa::{DoubleWord, Word},
+};
 use crate::{
-    memory::page,
-    types::{Address, DoubleWord, Fd, Word},
-    InstrumentedState, MemoryReader,
+    memory::{page, Address, MemoryReader},
+    InstrumentedState,
 };
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
@@ -18,6 +20,16 @@ const MIPS_EBADF: u64 = 0x9;
 
 /// https://www.cs.cmu.edu/afs/club/usr/jhutz/project/Linux/src/include/asm-mips/errno.h
 const MIPS_EINVAL: u64 = 0x16;
+
+def_enum!(Fd {
+    StdIn = 0,
+    Stdout = 1,
+    StdErr = 2,
+    HintRead = 3,
+    HintWrite = 4,
+    PreimageRead = 5,
+    PreimageWrite = 6,
+});
 
 def_enum!(Syscall {
     Mmap = 5009,
@@ -80,7 +92,7 @@ where
                     self.state.exit_code = a0 as u8;
                     return Ok(());
                 }
-                Syscall::Read => match (a0 as u8).try_into() {
+                Syscall::Read => match Fd::try_from(a0 as u32) {
                     Ok(Fd::StdIn) => {
                         // Nothing to do; Leave v0 and v1 zero, read nothing, and give no error.
                     }
@@ -122,7 +134,7 @@ where
                         v1 = MIPS_EBADF;
                     }
                 },
-                Syscall::Write => match (a0 as u8).try_into() {
+                Syscall::Write => match Fd::try_from(a0 as u32) {
                     Ok(fd @ (Fd::Stdout | Fd::StdErr)) => {
                         let mut reader =
                             MemoryReader::new(&mut self.state.memory, a1 as Address, a2);
@@ -198,7 +210,7 @@ where
                 },
                 Syscall::Fcntl => {
                     if a1 == 3 {
-                        match (a0 as u8).try_into() {
+                        match Fd::try_from(a0 as u32) {
                             Ok(Fd::StdIn | Fd::PreimageRead | Fd::HintRead) => {
                                 v0 = 0; // O_RDONLY
                             }

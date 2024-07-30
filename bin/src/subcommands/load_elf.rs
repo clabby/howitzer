@@ -5,7 +5,7 @@ use alloy_primitives::B256;
 use anyhow::Result;
 use clap::Args;
 use howitzer_fpvm::{
-    types::state_hash,
+    state::state_hash,
     utils::patch::{load_elf, patch_go, patch_stack},
 };
 use howitzer_kernel::gz::compress_bytes;

@@ -1,9 +1,9 @@
 //! The memory module contains the [Memory] data structure and its functionality for the emulator.
 
-use super::MEMORY_PROOF_SIZE;
+use super::{page::SharedCachedPage, MEMORY_PROOF_SIZE};
 use crate::{
-    memory::page,
-    types::{Address, DoubleWord, Gindex, Page, SharedCachedPage, Word},
+    memory::{page, page::Page, Address, Gindex},
+    mips::mips_isa::{DoubleWord, Word},
     utils::keccak_concat_hashes,
 };
 use alloy_primitives::B256;
@@ -727,7 +727,7 @@ mod test {
 
     mod serialize {
         use super::*;
-        use crate::types::{Gindex, SharedCachedPage};
+        use crate::memory::Gindex;
         use proptest::{
             prelude::{any, Arbitrary},
             proptest,

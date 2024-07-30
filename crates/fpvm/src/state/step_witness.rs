@@ -1,26 +1,10 @@
 //! This module contains the various witness types.
 
-use crate::{
-    memory::MEMORY_PROOF_SIZE,
-    types::{State, StateWitness},
-    utils::keccak256,
-};
+use super::{StateWitness, STATE_WITNESS_SIZE};
+use crate::memory::MEMORY_PROOF_SIZE;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_sol_types::{sol, SolCall};
 use kona_preimage::PreimageKeyType;
-
-/// The size of an encoded [StateWitness] in bytes.
-pub const STATE_WITNESS_SIZE: usize = 378;
-
-/// Compute the hash of the [StateWitness]
-pub fn state_hash(witness: StateWitness) -> [u8; 32] {
-    let mut hash = keccak256(witness);
-    let offset = 32 * 2 + 8 * 6;
-    let exit_code = witness[offset];
-    let exited = witness[offset + 1] == 1;
-    hash[0] = State::vm_status(exited, exit_code) as u8;
-    *hash
-}
 
 /// A [StepWitness] is produced after each instruction step of the MIPS emulator. It contains
 /// the encoded [StateWitness], the proof of memory access, and the preimage key, value, and

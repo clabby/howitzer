@@ -3,11 +3,11 @@
 mod instrumented;
 pub use instrumented::InstrumentedState;
 
-mod mips_vm;
+pub(crate) mod mips_vm;
 
-mod mips_isa;
+pub(crate) mod mips_isa;
 
-mod mips_linux;
+pub(crate) mod mips_linux;
 
 /// Defines an enum type with underlying [u32] representation on variants, and a [TryFrom]
 /// implementation automatically generated.

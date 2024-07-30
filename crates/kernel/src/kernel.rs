@@ -2,7 +2,7 @@
 
 use crate::{gz::compress_bytes, types::Proof};
 use anyhow::{anyhow, Result};
-use howitzer_fpvm::{types::state_hash, InstrumentedState};
+use howitzer_fpvm::{state::state_hash, InstrumentedState};
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::{
     fs::File,

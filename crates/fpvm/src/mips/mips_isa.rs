@@ -1,8 +1,13 @@
 //! Supported MIPS32/MIPS64 instructions for the emulator.
 
 use super::def_enum;
-use crate::types::Word;
 use anyhow::Result;
+
+/// A single word within the MIPS64 architecture is 32 bits wide.
+pub type Word = u32;
+
+/// A double word within the MIPS64 architecture is 64 bits wide.
+pub type DoubleWord = u64;
 
 /// A J-Type instruction in the MIPS64 architecture.
 ///

@@ -1,13 +1,10 @@
 //! This module contains the MIPS VM implementation for the [InstrumentedState].
 
 use super::mips_isa::{
-    IType, JType, Opcode, RType, RegImmFunction, Special2Function, SpecialFunction,
+    DoubleWord, IType, JType, Opcode, RType, RegImmFunction, Special2Function, SpecialFunction,
+    Word,
 };
-use crate::{
-    types::{Address, DoubleWord, Word},
-    utils::sign_extend,
-    InstrumentedState,
-};
+use crate::{memory::Address, utils::sign_extend, InstrumentedState};
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::io::Write;

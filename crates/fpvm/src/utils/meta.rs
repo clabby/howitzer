@@ -1,9 +1,9 @@
+use crate::memory::Address;
 use anyhow::{anyhow, Result};
 use elf::{endian::AnyEndian, ElfBytes};
 use serde::{Deserialize, Serialize};
 
-use crate::types::Address;
-
+/// A symbol within an ELF binary.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Symbol {
     /// The name of the symbol.
@@ -14,6 +14,7 @@ pub struct Symbol {
     pub size: u64,
 }
 
+/// The [Meta] struct contains metadata about the symbols in an ELF binary.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Meta {
     /// The symbols in the binary.
@@ -21,7 +22,14 @@ pub struct Meta {
 }
 
 impl Meta {
-    /// Create [Meta] from an elf file
+    /// Create [Meta] from an elf file.
+    ///
+    /// ## Takes
+    /// - `elf`: The ELF file to parse.
+    ///
+    /// ## Returns
+    /// - `Ok(Meta)` if the parsing was successful.
+    /// - `Err(_)` if the parsing failed.
     pub fn from_elf(elf: ElfBytes<AnyEndian>) -> Result<Self> {
         let (parsing_table, string_table) =
             elf.symbol_table()?.ok_or_else(|| anyhow!("No segments found"))?;
@@ -46,7 +54,13 @@ impl Meta {
         Ok(Self { symbols })
     }
 
-    /// Lookup a symbol name by address
+    /// Lookup the symbol at a given address.
+    ///
+    /// ## Takes
+    /// - `address`: The address to lookup.
+    ///
+    /// ## Returns
+    /// - The name of the symbol at the address.
     pub fn lookup(&self, address: Address) -> String {
         if self.symbols.is_empty() {
             return "unknown".to_string();

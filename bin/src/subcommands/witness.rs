@@ -4,7 +4,7 @@ use super::HowitzerSubcommandDispatcher;
 use alloy_primitives::B256;
 use anyhow::Result;
 use clap::Args;
-use howitzer_fpvm::types::{state_hash, State};
+use howitzer_fpvm::state::{state_hash, State};
 use howitzer_kernel::gz::decompress_bytes;
 use std::{fs, path::PathBuf};
 

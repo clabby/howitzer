@@ -2,13 +2,12 @@
 //!
 //! [Memory]: crate::Memory
 
-use crate::{
-    types::{Address, Gindex, Page},
-    utils::keccak_concat_hashes,
-};
+use super::{Address, Gindex};
+use crate::utils::keccak_concat_hashes;
 use alloy_primitives::B256;
 use anyhow::Result;
 use once_cell::sync::Lazy;
+use std::{cell::RefCell, rc::Rc};
 
 #[cfg(not(feature = "simd-keccak"))]
 use crate::utils::keccak256;
@@ -40,6 +39,12 @@ pub(crate) static DEFAULT_CACHE: Lazy<[B256; PAGE_SIZE_WORDS]> = Lazy::new(|| {
     page.merkle_root().unwrap();
     page.cache
 });
+
+/// A [Page] is a portion of memory of size `PAGE_SIZE`.
+pub type Page = [u8; PAGE_SIZE];
+
+/// A [CachedPage] with shared ownership.
+pub type SharedCachedPage = Rc<RefCell<CachedPage>>;
 
 /// A [CachedPage] is a [Page] with an in-memory cache of intermediate nodes.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

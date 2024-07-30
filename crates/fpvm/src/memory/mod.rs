@@ -1,10 +1,16 @@
 //! Contains the memory implementation for the Howitzer FPVM.
 
-pub const MEMORY_CELL_SIZE: usize = 64;
-pub const MEMORY_PROOF_SIZE: usize = MEMORY_CELL_SIZE - 4;
+use crate::mips::mips_isa::DoubleWord;
 
-pub(crate) mod page;
-pub use page::CachedPage;
+pub const MEMORY_PROOF_SIZE: usize = (DoubleWord::BITS - 4) as usize;
+
+/// A [Gindex] is a generalized index, defined as $2^{\text{depth}} + \text{index}$.
+pub type Gindex = u64;
+
+/// An [Address] is a 64 bit address in the MIPS emulator's memory.
+pub type Address = u64;
+
+pub mod page;
 
 mod map_memory;
 pub use map_memory::{Memory, MemoryReader};

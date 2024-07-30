@@ -1,8 +1,9 @@
 //! This module contains the [InstrumentedState] definition.
 
+use super::mips_isa::DoubleWord;
 use crate::{
-    memory::MEMORY_PROOF_SIZE,
-    types::{Address, DoubleWord, State, StepWitness},
+    memory::{Address, MEMORY_PROOF_SIZE},
+    state::{State, StepWitness},
 };
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
@@ -123,8 +124,9 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
+        memory::Address,
+        state::State,
         test_utils::{ClaimTestOracle, StaticOracle, BASE_ADDR_END, END_ADDR},
-        types::{Address, State},
         utils::{
             meta::Meta,
             patch::{load_elf, patch_go, patch_stack},
