@@ -10,7 +10,7 @@ use crate::{
 };
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
-use std::io::{BufReader, Read, Write};
+use std::io::Write;
 
 const DOUBLEWORD_MASK: DoubleWord = DoubleWord::MAX;
 const WORD_MASK: DoubleWord = Word::MAX as DoubleWord;
@@ -655,40 +655,6 @@ where
         self.state.pc = self.state.next_pc;
         self.state.next_pc += 4;
         Ok(())
-    }
-
-    /// Read the preimage for the given key and offset from the [PreimageOracle] server.
-    ///
-    /// ### Takes
-    /// - `key`: The key of the preimage (the preimage's [alloy_primitives::keccak256] digest).
-    /// - `offset`: The offset of the preimage to fetch.
-    ///
-    /// ### Returns
-    /// - `Ok((data, data_len))`: The preimage data and length.
-    /// - `Err(_)`: An error occurred while fetching the preimage.
-    #[inline]
-    pub(crate) async fn read_preimage(
-        &mut self,
-        key: [u8; 32],
-        offset: u64,
-    ) -> Result<([u8; 32], usize)> {
-        if key != self.last_preimage_key {
-            let data = self.preimage_oracle.get_preimage(key.try_into()?).await?;
-            self.last_preimage_key = key;
-
-            // Add the length prefix to the preimage
-            // Resizes the `last_preimage` vec in-place to reduce reallocations.
-            self.last_preimage.resize(8 + data.len(), 0);
-            self.last_preimage[0..8].copy_from_slice(&data.len().to_be_bytes());
-            self.last_preimage[8..].copy_from_slice(&data);
-        }
-
-        self.last_preimage_offset = offset;
-
-        let mut data = [0u8; 32];
-        let data_len =
-            BufReader::new(&self.last_preimage[offset as usize..]).read(data.as_mut_slice())?;
-        Ok((data, data_len))
     }
 
     /// Track an access to [crate::Memory] at the given [Address].

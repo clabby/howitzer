@@ -5,12 +5,14 @@
 
 use crate::{
     memory::page,
-    types::{Address, DoubleWord, Fd},
+    types::{Address, DoubleWord, Fd, Word},
     InstrumentedState, MemoryReader,
 };
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
-use std::io::{self, Read, Write};
+use std::io::{self, BufReader, Read, Write};
+
+use super::def_enum;
 
 /// https://www.cs.cmu.edu/afs/club/usr/jhutz/project/Linux/src/include/asm-mips/errno.h
 const MIPS_EBADF: u64 = 0x9;
@@ -18,10 +20,7 @@ const MIPS_EBADF: u64 = 0x9;
 /// https://www.cs.cmu.edu/afs/club/usr/jhutz/project/Linux/src/include/asm-mips/errno.h
 const MIPS_EINVAL: u64 = 0x16;
 
-/// A [Syscall] is a system call that can be made to the kernel from userspace within the emulator.
-///
-/// Syscalls in this list are specific to the MIPS64 architecture.
-pub enum Syscall {
+def_enum!(Syscall {
     Mmap = 5009,
     Brk = 5012,
     Clone = 5055,
@@ -29,24 +28,7 @@ pub enum Syscall {
     Read = 5000,
     Write = 5001,
     Fcntl = 5070,
-}
-
-impl TryFrom<u64> for Syscall {
-    type Error = anyhow::Error;
-
-    fn try_from(n: u64) -> Result<Self, Self::Error> {
-        match n {
-            5009 => Ok(Syscall::Mmap),
-            5012 => Ok(Syscall::Brk),
-            5055 => Ok(Syscall::Clone),
-            5205 => Ok(Syscall::ExitGroup),
-            5000 => Ok(Syscall::Read),
-            5001 => Ok(Syscall::Write),
-            5070 => Ok(Syscall::Fcntl),
-            _ => anyhow::bail!("Failed to convert {} to Syscall", n),
-        }
-    }
-}
+});
 
 impl<O, E, P> InstrumentedState<O, E, P>
 where
@@ -54,10 +36,11 @@ where
     E: Write,
     P: HintRouter + PreimageFetcher,
 {
-    /// Handles a syscall within the MIPS thread context emulation.
+    /// Handles a [Syscall] dispatch within the MIPS kernel.
     ///
     /// ### Returns
-    /// - A [Result] indicating if the syscall dispatch was successful.
+    /// - `Ok(())` - The syscall was successfully handled.
+    /// - `Err(_)` - An error occurred while handling the syscall.
     #[inline]
     pub(crate) async fn handle_syscall(&mut self) -> Result<()> {
         let mut v0 = 0;
@@ -66,7 +49,7 @@ where
         let (a0, a1, mut a2) =
             (self.state.registers[4], self.state.registers[5], self.state.registers[6]);
 
-        if let Ok(syscall) = Syscall::try_from(self.state.registers[2]) {
+        if let Ok(syscall) = Syscall::try_from(self.state.registers[2] as Word) {
             match syscall {
                 Syscall::Mmap => {
                     let mut sz = a1;
@@ -244,5 +227,39 @@ where
         self.state.next_pc += 4;
 
         Ok(())
+    }
+
+    /// Read the preimage for the given key and offset from the [PreimageOracle] server.
+    ///
+    /// ### Takes
+    /// - `key`: The key of the preimage (the preimage's [alloy_primitives::keccak256] digest).
+    /// - `offset`: The offset of the preimage to fetch.
+    ///
+    /// ### Returns
+    /// - `Ok((data, data_len))`: The preimage data and length.
+    /// - `Err(_)`: An error occurred while fetching the preimage.
+    #[inline]
+    pub(crate) async fn read_preimage(
+        &mut self,
+        key: [u8; 32],
+        offset: u64,
+    ) -> Result<([u8; 32], usize)> {
+        if key != self.last_preimage_key {
+            let data = self.preimage_oracle.get_preimage(key.try_into()?).await?;
+            self.last_preimage_key = key;
+
+            // Add the length prefix to the preimage
+            // Resizes the `last_preimage` vec in-place to reduce reallocations.
+            self.last_preimage.resize(8 + data.len(), 0);
+            self.last_preimage[0..8].copy_from_slice(&data.len().to_be_bytes());
+            self.last_preimage[8..].copy_from_slice(&data);
+        }
+
+        self.last_preimage_offset = offset;
+
+        let mut data = [0u8; 32];
+        let data_len =
+            BufReader::new(&self.last_preimage[offset as usize..]).read(data.as_mut_slice())?;
+        Ok((data, data_len))
     }
 }
