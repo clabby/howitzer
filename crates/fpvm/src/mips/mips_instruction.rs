@@ -6,6 +6,7 @@ use anyhow::Result;
 /// MIPS64 opcodes supported by the emulator.
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Opcode {
     // MIPS32
     SPECIAL = 0x00,
@@ -110,6 +111,7 @@ impl TryFrom<u32> for Opcode {
 /// Supported functions for the [Opcode::SPECIAL] opcode.
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum SpecialFunction {
     // MIPS32
     SLL = 0x00,
@@ -224,6 +226,7 @@ impl TryFrom<u32> for SpecialFunction {
 /// Supported functions for the [Opcode::SPECIAL2] opcode.
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Special2Function {
     // MIPS32
     MUL = 0x02,

@@ -172,7 +172,7 @@ mod test {
         assert_eq!(node, expected_parent, "Parent should be correct");
 
         let node = page.merkleize_subtree(g_index >> 2).unwrap();
-        let expected_grandparent = keccak_concat_hashes(expected_parent.into(), ZERO_HASHES[1]);
+        let expected_grandparent = keccak_concat_hashes(expected_parent, ZERO_HASHES[1]);
         assert_eq!(node, expected_grandparent, "Grandparent should be correct");
 
         let pre = page.merkle_root().unwrap();

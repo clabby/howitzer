@@ -52,10 +52,7 @@ impl ClaimTestOracle {
 
     #[inline(always)]
     pub fn diff() -> B512 {
-        concat_fixed(
-            keccak256(Self::A.to_be_bytes()).into(),
-            keccak256(Self::B.to_be_bytes()).into(),
-        )
+        concat_fixed(keccak256(Self::A.to_be_bytes()), keccak256(Self::B.to_be_bytes()))
     }
 
     #[inline(always)]

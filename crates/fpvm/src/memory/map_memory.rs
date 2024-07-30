@@ -53,7 +53,7 @@ impl Memory {
         }
 
         // Find the page and invalidate the address within it.
-        match self.page_lookup(address as u64 >> page::PAGE_ADDRESS_SIZE) {
+        match self.page_lookup(address >> page::PAGE_ADDRESS_SIZE) {
             Some(page) => {
                 let mut page = page.borrow_mut();
                 let prev_valid = !page.valid[1];
@@ -119,7 +119,7 @@ impl Memory {
             let depth_into_page = bits - 1 - page::PAGE_KEY_SIZE;
             let page_index = (g_index >> depth_into_page) & page::PAGE_KEY_MASK as u64;
             return self.pages.get(&page_index).map_or(
-                Ok(page::ZERO_HASHES[MEMORY_PROOF_SIZE - bits as usize]),
+                Ok(page::ZERO_HASHES[MEMORY_PROOF_SIZE - bits]),
                 |page| {
                     let page_g_index =
                         (1 << depth_into_page) | (g_index & ((1 << depth_into_page) - 1));
@@ -134,7 +134,7 @@ impl Memory {
 
         match self.nodes.get(&g_index) {
             Some(Some(node)) => return Ok(*node),
-            None => return Ok(page::ZERO_HASHES[MEMORY_PROOF_SIZE - bits as usize]),
+            None => return Ok(page::ZERO_HASHES[MEMORY_PROOF_SIZE - bits]),
             _ => { /* noop */ }
         }
 
@@ -268,7 +268,7 @@ impl Memory {
             anyhow::bail!("Unaligned memory access: {:x}", address);
         }
 
-        match self.page_lookup(address as u64 >> page::PAGE_ADDRESS_SIZE as u64) {
+        match self.page_lookup(address >> page::PAGE_ADDRESS_SIZE as u64) {
             Some(page) => {
                 let page_address = address as usize & page::PAGE_ADDRESS_MASK;
                 Ok(Word::from_be_bytes(
@@ -499,11 +499,11 @@ impl<'a> Read for MemoryReader<'a> {
 
         let end_address = self.address + self.count as Address;
 
-        let page_index = self.address as u64 >> page::PAGE_ADDRESS_SIZE as u64;
+        let page_index = self.address >> page::PAGE_ADDRESS_SIZE as u64;
         let start = self.address as usize & page::PAGE_ADDRESS_MASK;
         let mut end = page::PAGE_SIZE;
 
-        if page_index == (end_address as u64 >> page::PAGE_ADDRESS_SIZE as u64) {
+        if page_index == (end_address >> page::PAGE_ADDRESS_SIZE as u64) {
             end = end_address as usize & page::PAGE_ADDRESS_MASK;
         }
         let n = end - start;
@@ -626,16 +626,8 @@ mod test {
             let p6 = memory.merkleize_subtree((1 << page::PAGE_KEY_SIZE) | 6).unwrap();
             let z = page::ZERO_HASHES[page::PAGE_ADDRESS_SIZE - 5];
             let r1 = keccak_concat_hashes(
-                keccak_concat_hashes(
-                    keccak_concat_hashes(z, z).into(),
-                    keccak_concat_hashes(z, p3).into(),
-                )
-                .into(),
-                keccak_concat_hashes(
-                    keccak_concat_hashes(z, p5).into(),
-                    keccak_concat_hashes(p6, z).into(),
-                )
-                .into(),
+                keccak_concat_hashes(keccak_concat_hashes(z, z), keccak_concat_hashes(z, p3)),
+                keccak_concat_hashes(keccak_concat_hashes(z, p5), keccak_concat_hashes(p6, z)),
             );
             let r2 = memory.merkleize_subtree(1 << (page::PAGE_KEY_SIZE - 3)).unwrap();
             assert_eq!(r1, r2, "Expecting manual page combination to match subtree merkle func");
@@ -766,7 +758,7 @@ mod test {
                     .prop_map(|(nodes, pages, lp_a, lp_b)| Memory {
                         nodes: nodes
                             .into_iter()
-                            .map(|(a, b)| (a, b.map(|x| x.try_into().unwrap())))
+                            .map(|(a, b)| (a, b.map(|x| x.into())))
                             .collect::<FxHashMap<_, _>>(),
                         pages: pages.into_iter().collect::<FxHashMap<_, _>>(),
                         last_page: [lp_a, lp_b],

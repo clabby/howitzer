@@ -114,7 +114,7 @@ where
             self.state.memory.set_memory_doubleword(address, val)?;
         }
 
-        return self.handle_rd(rd_reg_index, val, true);
+        self.handle_rd(rd_reg_index, val, true)
     }
 
     /// Executes a [Opcode::SPECIAL] or [Opcode::SPECIAL2] instruction.
@@ -156,7 +156,7 @@ where
                     }
                     SpecialFunction::SRAV => Some(sign_extend(
                         ((rt_val & 0xFFFFFFFF) as i32 >> (rs_val & 0x1F)) as u64,
-                        32 - rs_val as u64,
+                        32 - rs_val,
                     )),
                     SpecialFunction::JR | SpecialFunction::JALR => {
                         let link_reg = if matches!(funct, SpecialFunction::JALR) {
@@ -398,7 +398,7 @@ where
             Opcode::SWL => {
                 let sr = (rs_val & 0x3) << 3;
                 let val = ((rt_val & WORD_MASK) >> sr) << (32 - ((rs_val & 0x4) << 3));
-                let mask = ((WORD_MASK >> sr) as u64) << (32 - ((rs_val & 0x4) << 3));
+                let mask = (WORD_MASK >> sr) << (32 - ((rs_val & 0x4) << 3));
                 Ok((0, Some(address), (mem & !mask) | val))
             }
             Opcode::SW | Opcode::SC => {
@@ -425,7 +425,7 @@ where
                 Ok((0, Some(address), (mem & !mask) | val))
             }
             Opcode::SDR => {
-                let val = rt_val << 56 - ((rs_val & 0x7) << 3);
+                let val = rt_val << (56 - ((rs_val & 0x7) << 3));
                 let mask = u64::MAX << (56 - ((rs_val & 0x7) << 3));
                 Ok((0, Some(address), (mem & !mask) | val))
             }
@@ -819,7 +819,7 @@ where
         self.state.pc = self.state.next_pc;
         self.state.next_pc = dest;
         if link_reg != 0 {
-            self.state.registers[link_reg as usize] = prev_pc + 8;
+            self.state.registers[link_reg] = prev_pc + 8;
         }
         Ok(())
     }
@@ -845,7 +845,7 @@ where
         }
 
         if store_reg != 0 && conditional {
-            self.state.registers[store_reg as usize] = val;
+            self.state.registers[store_reg] = val;
         }
 
         self.state.pc = self.state.next_pc;

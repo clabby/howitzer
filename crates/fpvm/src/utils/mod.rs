@@ -2,9 +2,9 @@
 
 use alloy_primitives::{B256, B512};
 
+pub mod meta;
 pub mod patch;
 pub mod ser;
-pub mod meta;
 
 /// Concatenate two fixed sized arrays together into a new array with minimal reallocation.
 #[inline(always)]
