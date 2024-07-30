@@ -1,9 +1,12 @@
 //! This module contains the MIPS VM implementation for the [InstrumentedState].
 
-use super::mips_instruction::{IType, JType, Opcode, RType, Special2Function, SpecialFunction};
+use super::{
+    mips_isa::{IType, JType, Opcode, RType, RegImmFunction, Special2Function, SpecialFunction},
+    mips_linux::Syscall,
+};
 use crate::{
     memory::{page, MemoryReader},
-    types::{Address, DoubleWord, Fd, Syscall, Word},
+    types::{Address, DoubleWord, Fd, Word},
     utils::sign_extend,
     InstrumentedState,
 };
@@ -670,18 +673,16 @@ where
             Opcode::BLEZ => (rs as i64) <= 0,
             // bgtz
             Opcode::BGTZ => (rs as i64) > 0,
-            Opcode::REGIMM => {
-                // regimm
-                if instruction.rt == 0 {
-                    // bltz
-                    (rs as i64) < 0
-                } else if instruction.rt == 1 {
-                    // bgez
+            Opcode::REGIMM => match RegImmFunction::try_from(instruction.rt)? {
+                RegImmFunction::BLTZ => (rs as i64) < 0,
+                RegImmFunction::BGEZ => (rs as i64) >= 0,
+                RegImmFunction::BGEZAL => {
+                    // Always set the link register to pc + 8
+                    self.state.registers[31] = self.state.pc + 8;
+
                     (rs as i64) >= 0
-                } else {
-                    false
                 }
-            }
+            },
             _ => false,
         };
 

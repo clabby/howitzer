@@ -5,4 +5,6 @@ pub use instrumented::InstrumentedState;
 
 mod mips_vm;
 
-mod mips_instruction;
+mod mips_isa;
+
+mod mips_linux;
