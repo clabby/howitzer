@@ -80,13 +80,9 @@ impl TrieMemory {
     /// - `Ok(None)` if the page was not found.
     /// - `Err(_)` if an error occurred during the lookup.
     pub fn page_lookup(&mut self, page_index: PageIndex, invalidate: bool) -> Option<&mut Page> {
-        // TODO(clabby): LRU cache page lookups
-
         // Fetch the page from the trie.
         let page_index_nibbles = Nibbles::unpack(page_index.to_be_bytes());
         self.page_trie.open(&page_index_nibbles, invalidate).ok().flatten()
-
-        // TODO(clabby): LRU cache page eviction
     }
 
     /// Get a 32-bit [Word] from memory at a given 4-byte aligned address.

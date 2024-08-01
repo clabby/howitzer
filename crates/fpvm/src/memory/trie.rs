@@ -34,25 +34,22 @@ pub(crate) const EMPTY_ROOT_HASH: B256 =
     b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
 
 /// A [TrieNode] is a node within a Radix Trie. In this implementation, keys are expected to be
-/// fixed-size nibble sequences, and values are arbitrary [Encodable] types.
+/// fixed-size nibble sequences, and values are arbitrary [Encodable] + [Decodable] types.
 ///
 /// The [TrieNode] has several variants:
 /// - [TrieNode::Empty] represents an empty node.
-/// - [TrieNode::Blinded] represents a node that has been blinded by a commitment.
 /// - [TrieNode::Leaf] represents a 2-item node with the encoding `rlp([encoded_path, value])`.
 /// - [TrieNode::Extension] represents a 2-item pointer node with the encoding `rlp([encoded_path,
 ///   key])`.
 /// - [TrieNode::Branch] represents a node that refers to up to 16 child nodes with the encoding
 ///   `rlp([ v0, ..., v15, value ])`.
 ///
-/// In this Radix Trie, nodes longer than an encoded 32 byte string (33 total bytes) are blinded
-/// with [keccak256] hashes. When a node is "opened", it is replaced with the [TrieNode] that is
-/// decoded from to the preimage of the hash.
-///
 /// The [alloy_rlp::Encodable] and [alloy_rlp::Decodable] traits are implemented for [TrieNode],
 /// allowing for RLP encoding and decoding of the types for storage and retrieval. The
-/// implementation of these traits will implicitly blind nodes that are longer than 32 bytes in
-/// length when encoding. When decoding, the implementation will leave blinded nodes in place.
+/// implementation of these traits will not blind the child nodes of the [TrieNode].
+///
+/// The [Self::root] function will merkle-encode the [TrieNode] recursively and return the hash of the
+/// encoded bytes.
 ///
 /// ## SAFETY
 /// As this implementation only supports uniform key sizes, the [TrieNode] data structure will fail
@@ -110,8 +107,8 @@ where
         }
 
         // Encode the node and hash the RLP encoded bytes.
-        let mut rlp_buf = Vec::with_capacity(self.hashed_length());
-        self.encode_hashed(&mut rlp_buf);
+        let mut rlp_buf = Vec::with_capacity(self.merkle_encoding_length());
+        self.encode_merkle(&mut rlp_buf);
         let commitment = keccak256(&rlp_buf);
 
         // Update the node's cached hash.
@@ -173,8 +170,8 @@ where
                     proof.extend(node.proof(&path.slice(BRANCH_NODE_NIBBLES..))?);
 
                     // Encode the branch node
-                    let mut rlp_buf = Vec::with_capacity(self.hashed_length());
-                    self.encode_hashed(&mut rlp_buf);
+                    let mut rlp_buf = Vec::with_capacity(self.merkle_encoding_length());
+                    self.encode_merkle(&mut rlp_buf);
                     proof.push(rlp_buf.into());
                 } else {
                     anyhow::bail!("Key does not exist in trie (branch node mismatch)")
@@ -182,8 +179,8 @@ where
             }
             TrieNode::Leaf { prefix, .. } => {
                 if path == prefix {
-                    let mut rlp_buf = Vec::with_capacity(self.hashed_length());
-                    self.encode_hashed(&mut rlp_buf);
+                    let mut rlp_buf = Vec::with_capacity(self.merkle_encoding_length());
+                    self.encode_merkle(&mut rlp_buf);
                     proof.push(rlp_buf.into());
                 } else {
                     anyhow::bail!("Key does not exist in trie (leaf node mismatch)")
@@ -195,8 +192,8 @@ where
                     proof.extend(node.proof(&path.slice(prefix.len()..))?);
 
                     // Encode the extension node
-                    let mut rlp_buf = Vec::with_capacity(self.hashed_length());
-                    self.encode_hashed(&mut rlp_buf);
+                    let mut rlp_buf = Vec::with_capacity(self.merkle_encoding_length());
+                    self.encode_merkle(&mut rlp_buf);
                     proof.push(rlp_buf.into());
                 } else {
                     anyhow::bail!("Key does not exist in trie (extension node mismatch)")
@@ -378,6 +375,115 @@ where
         }
     }
 
+    /// Returns the RLP payload length of the [TrieNode], when encoding for full snapshots.
+    pub(crate) fn payload_length(&self) -> usize {
+        match self {
+            TrieNode::Empty => 0,
+            TrieNode::Leaf { prefix, value, .. } => {
+                let mut encoded_key_len = prefix.len() / 2 + 1;
+                if encoded_key_len != 1 {
+                    encoded_key_len += length_of_length(encoded_key_len);
+                }
+                encoded_key_len + value.length()
+            }
+            TrieNode::Extension { prefix, node, .. } => {
+                let mut encoded_key_len = prefix.len() / 2 + 1;
+                if encoded_key_len != 1 {
+                    encoded_key_len += length_of_length(encoded_key_len);
+                }
+                encoded_key_len + node.length()
+            }
+            TrieNode::Branch { stack, .. } => {
+                stack.iter().fold(0, |mut acc, node| {
+                    acc += node.length();
+                    acc
+                })
+            }
+        }
+    }
+
+    /// Encodes the [TrieNode] with child nodes hashed.
+    ///
+    /// This function is semantically very different from [Encodable::encode], in that it will blind
+    /// the children of the [TrieNode].
+    pub(crate) fn encode_merkle(&mut self, out: &mut dyn alloy_rlp::BufMut) {
+        let payload_length = self.merkle_payload_length();
+        match self {
+            Self::Empty => out.put_u8(EMPTY_STRING_CODE),
+            Self::Leaf { prefix, value, .. } => {
+                // Encode the leaf node's header and key-value pair.
+                Header { list: true, payload_length }.encode(out);
+                prefix.encode_path_leaf(true).as_slice().encode(out);
+                value.encode(out);
+            }
+            Self::Extension { prefix, node, .. } => {
+                // Encode the extension node's header, prefix, and pointer node.
+                Header { list: true, payload_length }.encode(out);
+                prefix.encode_path_leaf(false).as_slice().encode(out);
+                node.root().encode(out);
+            }
+            Self::Branch { stack, .. } => {
+                // In branch nodes, if an element is longer than 32 bytes in length, it is blinded.
+                // Assuming we have an open trie node, we must re-hash the elements
+                // that are longer than 32 bytes in length.
+                Header { list: true, payload_length }.encode(out);
+                stack.iter_mut().for_each(|node| {
+                    node.root().encode(out);
+                });
+            }
+        }
+    }
+
+    /// Returns the length of [TrieNode] when RLP encoded for merkleization.
+    pub(crate) fn merkle_encoding_length(&self) -> usize {
+        match self {
+            Self::Empty => 1,
+            Self::Leaf { .. } => {
+                let payload_length = self.merkle_payload_length();
+                Header { list: true, payload_length }.length() + payload_length
+            }
+            Self::Extension { .. } => {
+                let payload_length = self.merkle_payload_length();
+                Header { list: true, payload_length }.length() + payload_length
+            }
+            Self::Branch { .. } => {
+                let payload_length = self.merkle_payload_length();
+                Header { list: true, payload_length }.length() + payload_length
+            }
+        }
+    }
+
+    /// Returns the RLP payload length of the [TrieNode], when encoding for merkleization.
+    pub(crate) fn merkle_payload_length(&self) -> usize {
+        match self {
+            TrieNode::Empty => 0,
+            TrieNode::Leaf { prefix, value, .. } => {
+                let mut encoded_key_len = prefix.len() / 2 + 1;
+                if encoded_key_len != 1 {
+                    encoded_key_len += length_of_length(encoded_key_len);
+                }
+                encoded_key_len + value.length()
+            }
+            TrieNode::Extension { prefix, node, .. } => {
+                let mut encoded_key_len = prefix.len() / 2 + 1;
+                if encoded_key_len != 1 {
+                    encoded_key_len += length_of_length(encoded_key_len);
+                }
+                encoded_key_len + node.merkle_encoding_length()
+            }
+            TrieNode::Branch { stack, .. } => {
+                // In branch nodes, if an element is longer than an encoded 32 byte string, it is
+                // blinded. Assuming we have an open trie node, we must re-hash the
+                // elements that are longer than an encoded 32 byte string
+                // in length.
+                stack.iter().fold(0, |mut acc, node| {
+                    acc += node.merkle_encoding_length();
+                    acc
+                })
+            }
+        }
+    }
+
     /// Attempts to convert a `path` and `value` into a [TrieNode], if they correspond to a
     /// [TrieNode::Leaf] or [TrieNode::Extension].
     ///
@@ -416,132 +522,6 @@ where
             }
             _ => {
                 anyhow::bail!("Unexpected path identifier in high-order nibble")
-            }
-        }
-    }
-
-    /// Returns the RLP payload length of the [TrieNode].
-    pub(crate) fn payload_length(&self) -> usize {
-        match self {
-            TrieNode::Empty => 0,
-            TrieNode::Leaf { prefix, value, .. } => {
-                let mut encoded_key_len = prefix.len() / 2 + 1;
-                if encoded_key_len != 1 {
-                    encoded_key_len += length_of_length(encoded_key_len);
-                }
-                encoded_key_len + value.length()
-            }
-            TrieNode::Extension { prefix, node, .. } => {
-                let mut encoded_key_len = prefix.len() / 2 + 1;
-                if encoded_key_len != 1 {
-                    encoded_key_len += length_of_length(encoded_key_len);
-                }
-                encoded_key_len + node.length()
-            }
-            TrieNode::Branch { stack, .. } => {
-                // In branch nodes, if an element is longer than an encoded 32 byte string, it is
-                // blinded. Assuming we have an open trie node, we must re-hash the
-                // elements that are longer than an encoded 32 byte string
-                // in length.
-                stack.iter().fold(0, |mut acc, node| {
-                    acc += node.length();
-                    acc
-                })
-            }
-        }
-    }
-
-    /// Returns the RLP payload length of the [TrieNode], when encoding with hashed children.
-    pub(crate) fn hashed_payload_length(&self) -> usize {
-        match self {
-            TrieNode::Empty => 0,
-            TrieNode::Leaf { prefix, value, .. } => {
-                let mut encoded_key_len = prefix.len() / 2 + 1;
-                if encoded_key_len != 1 {
-                    encoded_key_len += length_of_length(encoded_key_len);
-                }
-                encoded_key_len + value.length()
-            }
-            TrieNode::Extension { prefix, node, .. } => {
-                let mut encoded_key_len = prefix.len() / 2 + 1;
-                if encoded_key_len != 1 {
-                    encoded_key_len += length_of_length(encoded_key_len);
-                }
-                encoded_key_len + node.blinded_length()
-            }
-            TrieNode::Branch { stack, .. } => {
-                // In branch nodes, if an element is longer than an encoded 32 byte string, it is
-                // blinded. Assuming we have an open trie node, we must re-hash the
-                // elements that are longer than an encoded 32 byte string
-                // in length.
-                stack.iter().fold(0, |mut acc, node| {
-                    acc += node.blinded_length();
-                    acc
-                })
-            }
-        }
-    }
-
-    /// Returns the encoded length of the trie node, blinding it if it is longer than an encoded
-    /// [B256] string in length.
-    ///
-    /// ## Returns
-    /// - `usize` - The encoded length of the value, blinded if the raw encoded length is longer
-    ///   than a [B256].
-    fn blinded_length(&self) -> usize {
-        let encoded_len = self.hashed_length();
-        if encoded_len >= B256::ZERO.len() {
-            B256::ZERO.length()
-        } else {
-            encoded_len
-        }
-    }
-
-    /// Encodes the [TrieNode] with child nodes hashed.
-    ///
-    /// Semantically very different from [Encodable::encode]
-    pub(crate) fn encode_hashed(&mut self, out: &mut dyn alloy_rlp::BufMut) {
-        let payload_length = self.hashed_payload_length();
-        match self {
-            Self::Empty => out.put_u8(EMPTY_STRING_CODE),
-            Self::Leaf { prefix, value, .. } => {
-                // Encode the leaf node's header and key-value pair.
-                Header { list: true, payload_length }.encode(out);
-                prefix.encode_path_leaf(true).as_slice().encode(out);
-                value.encode(out);
-            }
-            Self::Extension { prefix, node, .. } => {
-                // Encode the extension node's header, prefix, and pointer node.
-                Header { list: true, payload_length }.encode(out);
-                prefix.encode_path_leaf(false).as_slice().encode(out);
-                node.root().encode(out);
-            }
-            Self::Branch { stack, .. } => {
-                // In branch nodes, if an element is longer than 32 bytes in length, it is blinded.
-                // Assuming we have an open trie node, we must re-hash the elements
-                // that are longer than 32 bytes in length.
-                Header { list: true, payload_length }.encode(out);
-                stack.iter_mut().for_each(|node| {
-                    node.root().encode(out);
-                });
-            }
-        }
-    }
-
-    pub(crate) fn hashed_length(&self) -> usize {
-        match self {
-            Self::Empty => 1,
-            Self::Leaf { .. } => {
-                let payload_length = self.hashed_payload_length();
-                Header { list: true, payload_length }.length() + payload_length
-            }
-            Self::Extension { .. } => {
-                let payload_length = self.hashed_payload_length();
-                Header { list: true, payload_length }.length() + payload_length
-            }
-            Self::Branch { .. } => {
-                let payload_length = self.hashed_payload_length();
-                Header { list: true, payload_length }.length() + payload_length
             }
         }
     }
@@ -645,7 +625,7 @@ where
 /// ## Returns
 /// - `Ok(usize)` - The total number of elements in the list
 /// - `Err(_)` - The RLP stream is not a list
-pub(crate) fn rlp_list_element_length(buf: &mut &[u8]) -> alloy_rlp::Result<usize> {
+fn rlp_list_element_length(buf: &mut &[u8]) -> alloy_rlp::Result<usize> {
     let header = Header::decode(buf)?;
     if !header.list {
         return Err(alloy_rlp::Error::UnexpectedString);
@@ -670,7 +650,7 @@ pub(crate) fn rlp_list_element_length(buf: &mut &[u8]) -> alloy_rlp::Result<usiz
 ///
 /// ## Returns
 /// - `Nibbles` - unpacked nibbles
-pub(crate) fn unpack_path_to_nibbles(first: Option<u8>, rest: &[u8]) -> Nibbles {
+fn unpack_path_to_nibbles(first: Option<u8>, rest: &[u8]) -> Nibbles {
     let rest = Nibbles::unpack(rest);
     Nibbles::from_vec_unchecked(first.into_iter().chain(rest.iter().copied()).collect::<Vec<u8>>())
 }
