@@ -145,7 +145,7 @@ impl TrieMemory {
         Ok(())
     }
 
-    /// Get a 64-bit [DoubleWord] from memory at a given 4-byte aligned address.
+    /// Get a 64-bit [DoubleWord] from memory at a given 8-byte aligned address.
     ///
     /// ## Takes
     /// - `address`: The address to read the word from.
@@ -154,39 +154,25 @@ impl TrieMemory {
     /// - `Ok(word)` if the read was successful.
     /// - `Err(_)` if the read failed.
     pub fn get_doubleword(&mut self, address: Address) -> Result<DoubleWord> {
-        // Check that the address is 4-byte aligned.
-        ensure!(address & 0x03 == 0, "Address is not 4-byte aligned");
+        // Check that the address is 8-byte aligned.
+        ensure!(address & 0x07 == 0, "Address is not 8-byte aligned");
 
         // Compute the page index and the memory address within it.
         let page_index = address >> PAGE_ADDRESS_SIZE;
         let page_address = address as usize & PAGE_ADDRESS_MASK;
-        let remaining_page_bytes = (PAGE_SIZE - page_address).min(8);
 
         // Create a temporary buffer to store the doubleword.
         let mut doubleword = [0u8; 8];
 
         // Attempt to fetch the doubleword from a single page.
         if let Some(page) = self.page_lookup(page_index, false) {
-            doubleword[0..remaining_page_bytes]
-                .copy_from_slice(&page[page_address..page_address + remaining_page_bytes]);
-        }
-
-        // If the page only contains part of the doubleword, we will need to fetch the remaining
-        // bytes from the next page.
-        if remaining_page_bytes < 8 {
-            let address = address + 4 as Address;
-            let page_index = address >> PAGE_ADDRESS_SIZE;
-            let page_address = address as usize & PAGE_ADDRESS_MASK;
-
-            if let Some(page) = self.page_lookup(page_index, false) {
-                doubleword[4..].copy_from_slice(&page[page_address..page_address + 4]);
-            }
+            doubleword.copy_from_slice(&page[page_address..page_address + 8]);
         }
 
         Ok(DoubleWord::from_be_bytes(doubleword))
     }
 
-    /// Set a 64-bit [DoubleWord] in memory at a given 4-byte aligned address.
+    /// Set a 64-bit [DoubleWord] in memory at a given 8-byte aligned address.
     ///
     /// ## Takes
     /// - `address`: The address to read the word from.
@@ -196,13 +182,12 @@ impl TrieMemory {
     /// - `Ok(())` if the write was successful.
     /// - `Err(_)` if the write failed.
     pub fn set_doubleword(&mut self, address: Address, value: DoubleWord) -> Result<()> {
-        // Check that the address is 4-byte aligned.
-        ensure!(address & 0x03 == 0, "Address is not 4-byte aligned");
+        // Check that the address is 8-byte aligned.
+        ensure!(address & 0x07 == 0, "Address is not 8-byte aligned");
 
         // Compute the page index and the memory address within it.
         let page_index = address >> PAGE_ADDRESS_SIZE;
         let page_address = address as usize & PAGE_ADDRESS_MASK;
-        let remaining_page_bytes = (PAGE_SIZE - page_address).min(8);
 
         // Store a buffer of the doubleword to write to memory.
         let value = value.to_be_bytes();
@@ -215,24 +200,7 @@ impl TrieMemory {
         };
 
         // Write the doubleword to the page.
-        page[page_address..page_address + remaining_page_bytes]
-            .copy_from_slice(value[..remaining_page_bytes].as_ref());
-
-        // If the page only contains part of the doubleword, we will need to write the remaining
-        // bytes to the next page.
-        if remaining_page_bytes < 8 {
-            let address = address + 4 as Address;
-            let page_index = address >> PAGE_ADDRESS_SIZE;
-            let page_address = address as usize & PAGE_ADDRESS_MASK;
-
-            let page = if let Some(page) = self.page_lookup(page_index, true) {
-                page
-            } else {
-                self.alloc_page(page_index)?
-            };
-
-            page[page_address..page_address + 4].copy_from_slice(&value[remaining_page_bytes..]);
-        }
+        page[page_address..page_address + 8].copy_from_slice(value.as_ref());
 
         Ok(())
     }
@@ -370,10 +338,7 @@ impl<'a> Read for MemoryReader<'a> {
 mod test {
     use super::TrieMemory;
     use crate::{
-        memory::{
-            trie_memory::{PAGE_ADDRESS_SIZE, PAGE_SIZE},
-            Address,
-        },
+        memory::{trie_memory::PAGE_SIZE, Address},
         mips::mips_isa::{DoubleWord, Word},
     };
     use alloy_trie::EMPTY_ROOT_HASH;
@@ -449,6 +414,34 @@ mod test {
     }
 
     #[test]
+    fn test_get_word_unaligned() {
+        let mut trie_mem = TrieMemory::default();
+        let mock_address = 0xFFFF_FFFF_FFFF_FFFD as Address;
+        assert!(trie_mem.get_word(mock_address).is_err());
+    }
+
+    #[test]
+    fn test_set_word_unaligned() {
+        let mut trie_mem = TrieMemory::default();
+        let mock_address = 0xFFFF_FFFF_FFFF_FFFD as Address;
+        assert!(trie_mem.set_word(mock_address, 0xBEEF_BABE).is_err());
+    }
+
+    #[test]
+    fn test_get_doubleword_unaligned() {
+        let mut trie_mem = TrieMemory::default();
+        let mock_address = 0xFFFF_FFFF_FFFF_FFFC as Address;
+        assert!(trie_mem.get_doubleword(mock_address).is_err());
+    }
+
+    #[test]
+    fn test_set_doubleword_unaligned() {
+        let mut trie_mem = TrieMemory::default();
+        let mock_address = 0xFFFF_FFFF_FFFF_FFFC as Address;
+        assert!(trie_mem.set_doubleword(mock_address, 0xBEEF_BABE).is_err());
+    }
+
+    #[test]
     fn test_set_get_word_aligned() {
         let mut trie_mem = TrieMemory::default();
         let mock_address = 0xFFFF_FFFF_FFFF_FFFC as Address;
@@ -482,28 +475,6 @@ mod test {
         trie_mem.set_doubleword(mock_address - 8, mock_value_b).unwrap();
         assert_eq!(trie_mem.page_count(), 1);
         assert_eq!(trie_mem.get_doubleword(mock_address - 8).unwrap(), mock_value_b);
-    }
-
-    #[test]
-    fn test_set_get_doubleword_aligned_cross_page() {
-        let mut trie_mem = TrieMemory::default();
-        let mock_address = 0xFFFF_FFFF_FFFF_EFFC as Address;
-        let mock_value = 0xBEEF_BABE_CAFE_F00D as DoubleWord;
-
-        assert_eq!(trie_mem.page_count(), 0);
-
-        trie_mem.set_doubleword(mock_address, mock_value).unwrap();
-        assert_eq!(trie_mem.page_count(), 2);
-        assert_eq!(trie_mem.get_doubleword(mock_address).unwrap(), mock_value);
-
-        let mock_value_be = mock_value.to_be_bytes();
-        let page_index = mock_address >> PAGE_ADDRESS_SIZE;
-
-        let left_page = trie_mem.page_lookup(page_index, false).unwrap();
-        assert_eq!(left_page[PAGE_SIZE - 4..PAGE_SIZE], mock_value_be[..4]);
-
-        let right_page = trie_mem.page_lookup(page_index + 1, false).unwrap();
-        assert_eq!(right_page[..4], mock_value_be[4..]);
     }
 
     #[test]
