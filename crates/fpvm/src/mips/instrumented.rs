@@ -237,11 +237,21 @@ mod test {
         patch_go(elf_bytes, &mut state).unwrap();
         patch_stack(&mut state).unwrap();
 
+        let metadata =
+            Meta::from_elf(ElfBytes::<AnyEndian>::minimal_parse(elf_bytes).unwrap()).unwrap();
+
         let out = BufWriter::new(Vec::default());
         let err = BufWriter::new(Vec::default());
         let mut ins = InstrumentedState::new(state, ClaimTestOracle::default(), out, err);
 
+        let mut last_symbol = None;
         for _ in 0..5_000_000 {
+            let symbol = metadata.lookup(ins.state.pc);
+            if last_symbol.unwrap_or_default() != symbol {
+                println!("pc: 0x{:x} symbol name: {}", ins.state.pc, symbol);
+            }
+            last_symbol = Some(symbol);
+            
             if ins.state.exited {
                 break;
             }

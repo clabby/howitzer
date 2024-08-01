@@ -10,7 +10,7 @@ pub type Gindex = u64;
 /// An [Address] is a 64 bit address in the MIPS emulator's memory.
 pub type Address = u64;
 
-mod trie;
+pub(crate) mod trie;
 
 pub(crate) mod page;
 
