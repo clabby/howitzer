@@ -1,10 +1,14 @@
 //! Radix trie based memory implementation.
 
 use super::{
+    page::{Page, PageIndex, EMPTY_PAGE},
     trie::{TrieNode, EMPTY_ROOT_HASH},
     Address,
 };
-use crate::mips::mips_isa::{DoubleWord, Word};
+use crate::{
+    memory::page::{PAGE_ADDRESS_MASK, PAGE_ADDRESS_SIZE, PAGE_SIZE},
+    mips::mips_isa::{DoubleWord, Word},
+};
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use anyhow::{anyhow, ensure, Result};
@@ -12,23 +16,6 @@ use nybbles::Nibbles;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
-
-const PAGE_ADDRESS_SIZE: usize = 12;
-const PAGE_KEY_SIZE: usize = 64 - PAGE_ADDRESS_SIZE;
-const PAGE_SIZE: usize = 1 << PAGE_ADDRESS_SIZE;
-const PAGE_SIZE_WORDS: usize = PAGE_SIZE >> 5;
-const PAGE_ADDRESS_MASK: usize = PAGE_SIZE - 1;
-const MAX_PAGE_COUNT: usize = 1 << PAGE_KEY_SIZE;
-const PAGE_KEY_MASK: usize = MAX_PAGE_COUNT - 1;
-
-/// An empty page of memory, zeroed out.
-const EMPTY_PAGE: Page = [0u8; PAGE_SIZE];
-
-/// An index of a [Page] within a [TrieMemory] structure.
-type PageIndex = u64;
-
-/// A page of memory, representing [PAGE_SIZE] bytes of data.
-type Page = [u8; PAGE_SIZE];
 
 /// [TrieMemory] is a hexary radix trie based memory implementation.
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
@@ -59,6 +46,18 @@ impl TrieMemory {
 
         // Attempt to fetch the blinded commitment. If there is an error, return the empty root hash.
         self.page_trie.blinded_commitment().unwrap_or(EMPTY_ROOT_HASH)
+    }
+
+    /// Generate a merkle trie proof for the [TrieNode] at a given [Address].
+    ///
+    /// ## Takes
+    /// - `address`: The address to generate the merkle proof for.
+    ///
+    /// ## Returns
+    /// - A list of merkle proof nodes for the [Page] containing the [Address].
+    pub fn merkle_proof(&mut self, address: Address) -> Result<Vec<Bytes>> {
+        let page_index = address >> PAGE_ADDRESS_SIZE;
+        self.page_trie.proof(&Nibbles::unpack(page_index.to_be_bytes()), &mut self.trie_cache)
     }
 
     /// Allocate a new page in thte [TrieMemory] at a given [PageIndex].
@@ -363,10 +362,8 @@ impl<'de> Deserialize<'de> for TrieMemory {
             Ok(())
         })?;
 
-        let trie_mem = TrieMemory {
-            page_trie: TrieNode::Blinded { commitment: serialized.root },
-            trie_cache
-        };
+        let trie_mem =
+            TrieMemory { page_trie: TrieNode::Blinded { commitment: serialized.root }, trie_cache };
 
         Ok(trie_mem)
     }
@@ -428,7 +425,9 @@ mod test {
             Address,
         },
         mips::mips_isa::{DoubleWord, Word},
+        utils::keccak256,
     };
+    use alloy_rlp::Decodable;
     use alloy_trie::EMPTY_ROOT_HASH;
     use std::io::Cursor;
 
@@ -457,6 +456,35 @@ mod test {
         // Ensure that the data within the memory trie may be revealed once again.
         let word = trie_mem.get_word(0).unwrap();
         assert_eq!(word, 0xFF_FF_FF_FF);
+    }
+
+    #[test]
+    fn test_proof_generation() {
+        let mut trie_mem = TrieMemory::default();
+
+        let cursor = Cursor::new(vec![0xFF; PAGE_SIZE * 2]);
+        trie_mem.set_memory_range(0, cursor).unwrap();
+
+        let proof = trie_mem.merkle_proof(0xFF).unwrap();
+
+        dbg!(&proof);
+        proof.iter().for_each(|node| {
+            dbg!(node.len());
+        });
+
+        trie_mem.merkleize();
+
+        // Replace the trie cache with the proof.
+        trie_mem.trie_cache = proof
+            .into_iter()
+            .map(|rlp| (keccak256(&rlp), TrieNode::decode(&mut rlp.as_ref()).unwrap()))
+            .collect();
+
+        // Ensure data may still be retrieved from the page where the proof points to.
+        assert_eq!(trie_mem.get_word(0).unwrap(), 0xFF_FF_FF_FF);
+
+        // Ensure data in the second page is inaccessible; We removed the preimages from the cache.
+        assert_eq!(trie_mem.get_word((PAGE_SIZE + 4) as Address).unwrap(), 0);
     }
 
     #[test]

@@ -100,7 +100,7 @@ where
                         let effective_address = (a1 & 0xFFFFFFFFFFFFFFF8) as Address;
 
                         self.track_mem_access(effective_address)?;
-                        let memory = self.state.memory.get_memory_doubleword(effective_address)?;
+                        let memory = self.state.memory.get_doubleword(effective_address)?;
 
                         let (data, mut data_len) = self
                             .read_preimage(self.state.preimage_key, self.state.preimage_offset)
@@ -117,7 +117,7 @@ where
 
                         let mut out_mem = memory.to_be_bytes();
                         out_mem[alignment..alignment + data_len].copy_from_slice(&data[..data_len]);
-                        self.state.memory.set_memory_doubleword(
+                        self.state.memory.set_doubleword(
                             effective_address,
                             u64::from_be_bytes(out_mem),
                         )?;
@@ -183,7 +183,7 @@ where
                         let memory = self
                             .state
                             .memory
-                            .get_memory_doubleword(effective_address as Address)?;
+                            .get_doubleword(effective_address as Address)?;
                         let mut key = self.state.preimage_key;
                         let alignment = a1 & 0x7;
                         let space = 8 - alignment;

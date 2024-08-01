@@ -78,10 +78,10 @@ where
         // state transition.
         let mut witness = proof
             .then(|| {
-                let instruction_proof = self.state.memory.merkle_proof(self.state.pc as Address)?;
+                // let instruction_proof = self.state.memory.merkle_proof(self.state.pc as Address)?;
 
                 let mut mem_proof = vec![0; MEMORY_PROOF_SIZE * 32 * 2];
-                mem_proof[0..MEMORY_PROOF_SIZE * 32].copy_from_slice(instruction_proof.as_slice());
+                // mem_proof[0..MEMORY_PROOF_SIZE * 32].copy_from_slice(instruction_proof.as_slice());
                 Ok::<_, anyhow::Error>(StepWitness {
                     state: self.state.encode_witness()?,
                     mem_proof,
@@ -184,8 +184,8 @@ mod test {
                 assert_eq!(END_ADDR, ins.state.pc, "must reach end");
                 let mut state = ins.state.memory;
                 let (done, result) = (
-                    state.get_memory_word((BASE_ADDR_END + 4) as Address).unwrap(),
-                    state.get_memory_word((BASE_ADDR_END + 8) as Address).unwrap(),
+                    state.get_word((BASE_ADDR_END + 4) as Address).unwrap(),
+                    state.get_word((BASE_ADDR_END + 8) as Address).unwrap(),
                 );
                 assert_eq!(done, 1, "must set done to 1 {:?}", f.file_name());
                 assert_eq!(result, 1, "must have success result {:?}", f.file_name());

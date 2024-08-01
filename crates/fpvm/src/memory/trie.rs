@@ -151,24 +151,91 @@ where
     }
 
     /// Returns the number of leaves in the trie rooted at `self`.
-    /// 
+    ///
     /// ## Takes
-    /// - `self` - The root trie node 
+    /// - `self` - The root trie node
     /// - `cache` - The cache of trie nodes
     ///
     /// ## Returns
-    /// - `usize` - The number of leaves in the trie 
+    /// - `usize` - The number of leaves in the trie
     pub fn leaf_count(&self, cache: &FxHashMap<B256, TrieNode<V>>) -> usize {
         match self {
             TrieNode::Empty => 0,
             TrieNode::Leaf { .. } => 1,
             TrieNode::Extension { node, .. } => node.leaf_count(cache),
-            TrieNode::Branch { stack } => stack.iter().fold(0, |acc, node| acc + node.leaf_count(cache)),
+            TrieNode::Branch { stack } => {
+                stack.iter().fold(0, |acc, node| acc + node.leaf_count(cache))
+            }
             TrieNode::Blinded { commitment } => {
                 let node = cache.get(commitment).expect("Missing preimage");
                 node.leaf_count(cache)
-            },
+            }
         }
+    }
+
+    /// Generates a proof for the given K/V pair in the trie rooted at `self`.
+    ///
+    /// ## Takes
+    /// - `path` - The nibbles representation of the path to the leaf node
+    /// - `cache` - The cache of trie nodes
+    ///
+    /// ## Returns
+    /// - `Ok(Vec<Bytes>)` - The proof for the given K/V pair
+    /// - `Err(_)` - Proof generation error
+    pub fn proof(
+        &mut self,
+        path: &Nibbles,
+        cache: &mut FxHashMap<B256, TrieNode<V>>,
+    ) -> Result<Vec<Bytes>> {
+        let mut proof = Vec::with_capacity(8);
+
+        match self {
+            TrieNode::Branch { stack } => {
+                let branch_nibble = path[0] as usize;
+                if let Some(node) = stack.get_mut(branch_nibble) {
+                    // Continue proof generation recursively
+                    proof.extend(node.proof(&path.slice(BRANCH_NODE_NIBBLES..), cache)?);
+
+                    // Encode the branch node
+                    let mut rlp_buf = Vec::with_capacity(self.length());
+                    self.encode_in_place(&mut rlp_buf, cache);
+                    proof.push(rlp_buf.into());
+                } else {
+                    anyhow::bail!("Key does not exist in trie (branch node mismatch)")
+                }
+            }
+            TrieNode::Leaf { prefix, .. } => {
+                if path == prefix {
+                    let mut rlp_buf = Vec::with_capacity(self.length());
+                    self.encode_in_place(&mut rlp_buf, cache);
+                    proof.push(rlp_buf.into());
+                } else {
+                    anyhow::bail!("Key does not exist in trie (leaf node mismatch)")
+                }
+            }
+            TrieNode::Extension { prefix, node } => {
+                if path.slice(..prefix.len()).as_slice() == prefix.as_slice() {
+                    // Continue proof generation recursively
+                    proof.extend(node.proof(&path.slice(prefix.len()..), cache)?);
+
+                    // Encode the extension node
+                    let mut rlp_buf = Vec::with_capacity(self.length());
+                    self.encode_in_place(&mut rlp_buf, cache);
+                    proof.push(rlp_buf.into());
+                } else {
+                    anyhow::bail!("Key does not exist in trie (extension node mismatch)")
+                }
+            }
+            TrieNode::Blinded { .. } => {
+                self.unblind(cache)?;
+                proof.extend(self.proof(path, cache)?);
+            }
+            TrieNode::Empty => {
+                anyhow::bail!("Key does not exist in trie (empty node)")
+            }
+        }
+
+        Ok(proof)
     }
 
     /// Walks down the trie to a leaf value with the given key, if it exists. Preimages for blinded
