@@ -2,7 +2,7 @@
 
 use super::{
     page::{Page, PageIndex, EMPTY_PAGE},
-    trie::{TrieNode, EMPTY_ROOT_HASH},
+    trie::TrieNode,
     Address,
 };
 use crate::{
@@ -10,10 +10,8 @@ use crate::{
     mips::mips_isa::{DoubleWord, Word},
 };
 use alloy_primitives::{Bytes, B256};
-use alloy_rlp::{Decodable, Encodable};
 use anyhow::{anyhow, ensure, Result};
 use nybbles::Nibbles;
-use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 
@@ -25,10 +23,6 @@ pub struct TrieMemory {
 }
 
 impl TrieMemory {
-    pub(crate) fn trie(&self) -> &TrieNode<Page> {
-        &self.page_trie
-    }
-
     /// Returns the number of pages within the [TrieMemory].
     pub fn page_count(&self) -> usize {
         self.page_trie.leaf_count()
@@ -68,7 +62,7 @@ impl TrieMemory {
         self.page_trie.insert(&page_index_nibbles, EMPTY_PAGE)?;
 
         self.page_trie
-            .open(&page_index_nibbles)
+            .open(&page_index_nibbles, true)
             .transpose()
             .ok_or_else(|| anyhow!("Failed to allocate page at index: {}", page_index))?
     }
@@ -83,12 +77,12 @@ impl TrieMemory {
     /// - `Ok(Some(page))` if the page was found.
     /// - `Ok(None)` if the page was not found.
     /// - `Err(_)` if an error occurred during the lookup.
-    pub fn page_lookup(&mut self, page_index: PageIndex) -> Option<&mut Page> {
+    pub fn page_lookup(&mut self, page_index: PageIndex, invalidate: bool) -> Option<&mut Page> {
         // TODO(clabby): LRU cache page lookups
 
         // Fetch the page from the trie.
         let page_index_nibbles = Nibbles::unpack(page_index.to_be_bytes());
-        self.page_trie.open(&page_index_nibbles).ok().flatten()
+        self.page_trie.open(&page_index_nibbles, invalidate).ok().flatten()
 
         // TODO(clabby): LRU cache page eviction
     }
@@ -110,7 +104,7 @@ impl TrieMemory {
         let page_address = address as usize & PAGE_ADDRESS_MASK;
 
         // Attempt to lookup the page in memory.
-        match self.page_lookup(page_index) {
+        match self.page_lookup(page_index, false) {
             Some(page) => {
                 let mut word_bytes = [0u8; 4];
                 word_bytes.copy_from_slice(&page[page_address..page_address + 4]);
@@ -138,7 +132,7 @@ impl TrieMemory {
         let page_address = address as usize & PAGE_ADDRESS_MASK;
 
         // Attempt to lookup the page in memory.
-        let page = if let Some(page) = self.page_lookup(page_index) {
+        let page = if let Some(page) = self.page_lookup(page_index, true) {
             page
         } else {
             self.alloc_page(page_index)?
@@ -170,7 +164,7 @@ impl TrieMemory {
         let mut doubleword = [0u8; 8];
 
         // Attempt to fetch the doubleword from a single page.
-        if let Some(page) = self.page_lookup(page_index) {
+        if let Some(page) = self.page_lookup(page_index, false) {
             doubleword[0..remaining_page_bytes]
                 .copy_from_slice(&page[page_address..page_address + remaining_page_bytes]);
         }
@@ -182,7 +176,7 @@ impl TrieMemory {
             let page_index = address >> PAGE_ADDRESS_SIZE;
             let page_address = address as usize & PAGE_ADDRESS_MASK;
 
-            if let Some(page) = self.page_lookup(page_index) {
+            if let Some(page) = self.page_lookup(page_index, false) {
                 doubleword[4..].copy_from_slice(&page[page_address..page_address + 4]);
             }
         }
@@ -212,7 +206,7 @@ impl TrieMemory {
         let value = value.to_be_bytes();
 
         // Attempt to fetch the doubleword from a single page.
-        let page = if let Some(page) = self.page_lookup(page_index) {
+        let page = if let Some(page) = self.page_lookup(page_index, true) {
             page
         } else {
             self.alloc_page(page_index)?
@@ -229,7 +223,7 @@ impl TrieMemory {
             let page_index = address >> PAGE_ADDRESS_SIZE;
             let page_address = address as usize & PAGE_ADDRESS_MASK;
 
-            let page = if let Some(page) = self.page_lookup(page_index) {
+            let page = if let Some(page) = self.page_lookup(page_index, true) {
                 page
             } else {
                 self.alloc_page(page_index)?
@@ -257,7 +251,7 @@ impl TrieMemory {
             let page_index = address >> PAGE_ADDRESS_SIZE as u64;
             let page_address = address as usize & PAGE_ADDRESS_MASK;
 
-            let page = if let Some(page) = self.page_lookup(page_index) {
+            let page = if let Some(page) = self.page_lookup(page_index, true) {
                 page
             } else {
                 self.alloc_page(page_index)?
@@ -397,7 +391,7 @@ impl<'a> Read for MemoryReader<'a> {
             end = end_address as usize & PAGE_ADDRESS_MASK;
         }
         let n = end - start;
-        match self.memory.page_lookup(page_index) {
+        match self.memory.page_lookup(page_index, false) {
             Some(page) => {
                 std::io::copy(&mut page[start..end].as_ref(), &mut buf)?;
             }
@@ -416,14 +410,11 @@ mod test {
     use super::TrieMemory;
     use crate::{
         memory::{
-            trie::TrieNode,
             trie_memory::{PAGE_ADDRESS_SIZE, PAGE_SIZE},
             Address,
         },
         mips::mips_isa::{DoubleWord, Word},
-        utils::keccak256,
     };
-    use alloy_rlp::Decodable;
     use alloy_trie::EMPTY_ROOT_HASH;
     use std::io::Cursor;
 
@@ -441,7 +432,7 @@ mod test {
         let cursor = Cursor::new(vec![0xFF; PAGE_SIZE]);
         trie_mem.set_memory_range(0, cursor).unwrap();
 
-        let root = trie_mem.merkleize();
+        let _ = trie_mem.merkleize();
 
         // Ensure that the data within the memory trie may be revealed once again.
         let word = trie_mem.get_word(0).unwrap();
@@ -477,7 +468,7 @@ mod test {
 
         trie_mem.alloc_page(mock_address).unwrap();
         assert_eq!(trie_mem.page_count(), 1);
-        assert!(trie_mem.page_lookup(mock_address).is_some());
+        assert!(trie_mem.page_lookup(mock_address, false).is_some());
     }
 
     #[test]
@@ -489,11 +480,11 @@ mod test {
 
         trie_mem.alloc_page(mock_address).unwrap();
         assert_eq!(trie_mem.page_count(), 1);
-        assert!(trie_mem.page_lookup(mock_address).is_some());
+        assert!(trie_mem.page_lookup(mock_address, false).is_some());
 
         trie_mem.alloc_page(mock_address - PAGE_SIZE as u64).unwrap();
         assert_eq!(trie_mem.page_count(), 2);
-        assert!(trie_mem.page_lookup(mock_address).is_some());
+        assert!(trie_mem.page_lookup(mock_address, false).is_some());
     }
 
     #[test]
@@ -547,10 +538,10 @@ mod test {
         let mock_value_be = mock_value.to_be_bytes();
         let page_index = mock_address >> PAGE_ADDRESS_SIZE;
 
-        let left_page = trie_mem.page_lookup(page_index).unwrap();
+        let left_page = trie_mem.page_lookup(page_index, false).unwrap();
         assert_eq!(left_page[PAGE_SIZE - 4..PAGE_SIZE], mock_value_be[..4]);
 
-        let right_page = trie_mem.page_lookup(page_index + 1).unwrap();
+        let right_page = trie_mem.page_lookup(page_index + 1, false).unwrap();
         assert_eq!(right_page[..4], mock_value_be[4..]);
     }
 
@@ -568,10 +559,10 @@ mod test {
         // determining that the read is complete.
         assert_eq!(trie_mem.page_count(), 3);
 
-        let left_page = trie_mem.page_lookup(0).unwrap();
+        let left_page = trie_mem.page_lookup(0, false).unwrap();
         assert_eq!(left_page, &[0xFF; PAGE_SIZE]);
 
-        let right_page = trie_mem.page_lookup(1).unwrap();
+        let right_page = trie_mem.page_lookup(1, false).unwrap();
         assert_eq!(right_page, &[0xFF; PAGE_SIZE]);
     }
 

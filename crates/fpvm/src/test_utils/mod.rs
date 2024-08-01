@@ -1,11 +1,10 @@
 //! Testing utilities.
 
-use crate::utils::{concat_fixed, keccak256};
-use alloy_primitives::{hex, B512};
+use alloy_primitives::{hex, keccak256, B512};
 use anyhow::Result;
 use async_trait::async_trait;
 use kona_preimage::{HintRouter, PreimageFetcher, PreimageKey, PreimageKeyType};
-use rustc_hash::FxHashMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -42,7 +41,7 @@ impl PreimageFetcher for StaticOracle {
 }
 
 pub struct ClaimTestOracle {
-    images: Arc<Mutex<FxHashMap<PreimageKey, Vec<u8>>>>,
+    images: Arc<Mutex<HashMap<PreimageKey, Vec<u8>>>>,
 }
 
 impl ClaimTestOracle {
@@ -52,7 +51,10 @@ impl ClaimTestOracle {
 
     #[inline(always)]
     pub fn diff() -> B512 {
-        concat_fixed(keccak256(Self::A.to_be_bytes()), keccak256(Self::B.to_be_bytes()))
+        let mut diff = B512::ZERO;
+        diff[..32].copy_from_slice(keccak256(&Self::A.to_be_bytes()).as_ref());
+        diff[32..].copy_from_slice(keccak256(&Self::B.to_be_bytes()).as_ref());
+        diff
     }
 
     #[inline(always)]
@@ -68,7 +70,7 @@ impl ClaimTestOracle {
 
 impl Default for ClaimTestOracle {
     fn default() -> Self {
-        let mut images = FxHashMap::default();
+        let mut images = HashMap::default();
         images.insert(PreimageKey::new_local(0), Self::pre_hash().to_vec());
         images.insert(PreimageKey::new_local(1), Self::diff_hash().to_vec());
         images.insert(

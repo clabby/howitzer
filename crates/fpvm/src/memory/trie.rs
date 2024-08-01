@@ -222,22 +222,33 @@ where
     /// ## Returns
     /// - `Err(_)` - Could not retrieve the node with the given key from the trie.
     /// - `Ok((_, _))` - The key and value of the node
-    pub fn open<'a>(&'a mut self, path: &Nibbles) -> Result<Option<&'a mut V>> {
+    pub fn open<'a>(&'a mut self, path: &Nibbles, invalidate: bool) -> Result<Option<&'a mut V>> {
         match self {
-            TrieNode::Branch { ref mut stack, .. } => {
+            TrieNode::Branch { ref mut stack, cached_hash } => {
+                if invalidate {
+                    *cached_hash = None;
+                }
+
                 let branch_nibble = path[0] as usize;
                 stack
                     .get_mut(branch_nibble)
-                    .map(|node| node.open(&path.slice(BRANCH_NODE_NIBBLES..)))
+                    .map(|node| node.open(&path.slice(BRANCH_NODE_NIBBLES..), invalidate))
                     .unwrap_or(Ok(None))
             }
-            TrieNode::Leaf { prefix, value, .. } => {
+            TrieNode::Leaf { prefix, value, cached_hash } => {
+                if invalidate {
+                    *cached_hash = None;
+                }
                 Ok((path.as_slice() == prefix.as_slice()).then_some(value))
             }
-            TrieNode::Extension { prefix, node, .. } => {
+            TrieNode::Extension { prefix, node, cached_hash } => {
                 if path.slice(..prefix.len()).as_slice() == prefix.as_slice() {
+                    if invalidate {
+                        *cached_hash = None;
+                    }
+
                     // Follow extension branch
-                    node.open(&path.slice(prefix.len()..))
+                    node.open(&path.slice(prefix.len()..), invalidate)
                 } else {
                     Ok(None)
                 }
@@ -489,7 +500,7 @@ where
     /// Encodes the [TrieNode] with child nodes hashed.
     ///
     /// Semantically very different from [Encodable::encode]
-    fn encode_hashed(&mut self, out: &mut dyn alloy_rlp::BufMut) {
+    pub(crate) fn encode_hashed(&mut self, out: &mut dyn alloy_rlp::BufMut) {
         let payload_length = self.hashed_payload_length();
         match self {
             Self::Empty => out.put_u8(EMPTY_STRING_CODE),

@@ -1,6 +1,7 @@
 //! This module contains the data structure for the state of the MIPS emulator.
 
-use crate::{memory::TrieMemory, utils::keccak256};
+use crate::memory::TrieMemory;
+use alloy_primitives::keccak256;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -108,10 +109,8 @@ impl State {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        state::{state_hash, State, STATE_WITNESS_SIZE},
-        utils::keccak256,
-    };
+    use alloy_primitives::keccak256;
+    use crate::state::{state_hash, State, STATE_WITNESS_SIZE};
 
     #[test]
     fn test_state_hash() {
