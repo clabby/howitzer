@@ -14,3 +14,8 @@ pub mod page;
 
 mod map_memory;
 pub use map_memory::{Memory, MemoryReader};
+
+mod trie;
+
+mod trie_memory;
+// pub use trie_memory::{TrieMemory, MemoryReader}
