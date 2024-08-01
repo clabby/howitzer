@@ -117,9 +117,9 @@ where
         // Update the node's cached hash.
         match self {
             TrieNode::Empty => (),
-            TrieNode::Leaf { cached_hash, .. }
-            | TrieNode::Extension { cached_hash, .. }
-            | TrieNode::Branch { cached_hash, .. } => *cached_hash = Some(commitment),
+            TrieNode::Leaf { cached_hash, .. } |
+            TrieNode::Extension { cached_hash, .. } |
+            TrieNode::Branch { cached_hash, .. } => *cached_hash = Some(commitment),
         }
 
         commitment
@@ -129,9 +129,9 @@ where
     pub fn cached_hash(&self) -> Option<B256> {
         match self {
             TrieNode::Empty => Some(EMPTY_ROOT_HASH),
-            TrieNode::Leaf { cached_hash, .. }
-            | TrieNode::Extension { cached_hash, .. }
-            | TrieNode::Branch { cached_hash, .. } => cached_hash.clone(),
+            TrieNode::Leaf { cached_hash, .. } |
+            TrieNode::Extension { cached_hash, .. } |
+            TrieNode::Branch { cached_hash, .. } => *cached_hash,
         }
     }
 
@@ -489,7 +489,7 @@ where
     /// - `usize` - The encoded length of the value, blinded if the raw encoded length is longer
     ///   than a [B256].
     fn blinded_length(&self) -> usize {
-        let encoded_len = self.length();
+        let encoded_len = self.hashed_length();
         if encoded_len >= B256::ZERO.len() {
             B256::ZERO.length()
         } else {
@@ -528,7 +528,7 @@ where
         }
     }
 
-    fn hashed_length(&self) -> usize {
+    pub(crate) fn hashed_length(&self) -> usize {
         match self {
             Self::Empty => 1,
             Self::Leaf { .. } => {

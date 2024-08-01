@@ -4,8 +4,7 @@ use alloy_primitives::{hex, keccak256, B512};
 use anyhow::Result;
 use async_trait::async_trait;
 use kona_preimage::{HintRouter, PreimageFetcher, PreimageKey, PreimageKeyType};
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 
 /// Used in tests to write the results to
@@ -52,8 +51,8 @@ impl ClaimTestOracle {
     #[inline(always)]
     pub fn diff() -> B512 {
         let mut diff = B512::ZERO;
-        diff[..32].copy_from_slice(keccak256(&Self::A.to_be_bytes()).as_ref());
-        diff[32..].copy_from_slice(keccak256(&Self::B.to_be_bytes()).as_ref());
+        diff[..32].copy_from_slice(keccak256(Self::A.to_be_bytes()).as_ref());
+        diff[32..].copy_from_slice(keccak256(Self::B.to_be_bytes()).as_ref());
         diff
     }
 

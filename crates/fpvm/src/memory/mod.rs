@@ -15,4 +15,4 @@ pub(crate) mod trie;
 pub(crate) mod page;
 
 mod trie_memory;
-pub use trie_memory::{TrieMemory, MemoryReader};
+pub use trie_memory::{MemoryReader, TrieMemory};

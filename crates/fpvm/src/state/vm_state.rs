@@ -109,8 +109,8 @@ impl State {
 
 #[cfg(test)]
 mod test {
-    use alloy_primitives::keccak256;
     use crate::state::{state_hash, State, STATE_WITNESS_SIZE};
+    use alloy_primitives::keccak256;
 
     #[test]
     fn test_state_hash() {

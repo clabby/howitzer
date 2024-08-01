@@ -10,6 +10,7 @@ use crate::{
     mips::mips_isa::{DoubleWord, Word},
 };
 use alloy_primitives::{Bytes, B256};
+use alloy_rlp::{Decodable, Encodable};
 use anyhow::{anyhow, ensure, Result};
 use nybbles::Nibbles;
 use serde::{Deserialize, Serialize};
@@ -28,7 +29,8 @@ impl TrieMemory {
         self.page_trie.leaf_count()
     }
 
-    /// Seal the open branches in the memory trie and flush intermediate node preimages to the cache.
+    /// Seal the open branches in the memory trie and flush intermediate node preimages to the
+    /// cache.
     ///
     /// ## Returns
     /// - `Ok(merkle_root)` if the memory trie was successfully merkleized.
@@ -67,8 +69,8 @@ impl TrieMemory {
             .ok_or_else(|| anyhow!("Failed to allocate page at index: {}", page_index))?
     }
 
-    /// Looks up a page in the [TrieMemory] by its index. This function will consult the cache before checking
-    /// the underlying trie.
+    /// Looks up a page in the [TrieMemory] by its index. This function will consult the cache
+    /// before checking the underlying trie.
     ///
     /// ## Takes
     /// - `page_index`: The index of the page to lookup.
@@ -169,8 +171,8 @@ impl TrieMemory {
                 .copy_from_slice(&page[page_address..page_address + remaining_page_bytes]);
         }
 
-        // If the page only contains part of the doubleword, we will need to fetch the remaining bytes from the
-        // next page.
+        // If the page only contains part of the doubleword, we will need to fetch the remaining
+        // bytes from the next page.
         if remaining_page_bytes < 8 {
             let address = address + 4 as Address;
             let page_index = address >> PAGE_ADDRESS_SIZE;
@@ -216,8 +218,8 @@ impl TrieMemory {
         page[page_address..page_address + remaining_page_bytes]
             .copy_from_slice(value[..remaining_page_bytes].as_ref());
 
-        // If the page only contains part of the doubleword, we will need to write the remaining bytes to the
-        // next page.
+        // If the page only contains part of the doubleword, we will need to write the remaining
+        // bytes to the next page.
         if remaining_page_bytes < 8 {
             let address = address + 4 as Address;
             let page_index = address >> PAGE_ADDRESS_SIZE;
@@ -292,48 +294,15 @@ impl TrieMemory {
     }
 }
 
-/// A serialized representation of the [TrieMemory] structure.
-#[derive(Serialize, Deserialize, Debug)]
-struct SerializedTrieMemory {
-    /// The root of the trie.
-    root: B256,
-    /// The cache entries of the trie.
-    cache_entries: Vec<TrieCacheEntry>,
-}
-
-/// A serialized representation of a [TrieMemory] cache entry.
-#[derive(Serialize, Deserialize, Debug)]
-struct TrieCacheEntry {
-    /// The hash of the node.
-    hash: B256,
-    /// The RLP encoded trie node.
-    data: Bytes,
-}
-
 impl Serialize for TrieMemory {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        todo!()
-        // // Clone the memory trie and merkleize it to hydrate the cache.
-        // let mut cloned = self.clone();
-        // let root = cloned.merkleize();
-        //
-        // let mut rlp_buf = Vec::with_capacity(1024);
-        // let cache_entries = cloned
-        //     .into_iter()
-        //     .map(|(hash, node)| {
-        //         rlp_buf.clear();
-        //         node.encode(&mut rlp_buf);
-        //
-        //         TrieCacheEntry { hash, data: Bytes::from(rlp_buf.clone()) }
-        //     })
-        //     .collect::<Vec<_>>();
-        //
-        // let serialized = SerializedTrieMemory { root, cache_entries };
-        //
-        // serialized.serialize(serializer)
+        let mut rlp_buf = Vec::with_capacity(self.page_trie.length());
+        self.page_trie.encode(&mut rlp_buf);
+
+        rlp_buf.serialize(serializer)
     }
 }
 
@@ -342,27 +311,19 @@ impl<'de> Deserialize<'de> for TrieMemory {
     where
         D: serde::Deserializer<'de>,
     {
-        todo!()
-        // let serialized = SerializedTrieMemory::deserialize(deserializer)?;
-        //
-        // let mut trie_cache = FxHashMap::default();
-        // serialized.cache_entries.into_iter().try_for_each(|entry| {
-        //     let node = TrieNode::decode(&mut entry.data.as_ref()).unwrap();
-        //     trie_cache.insert(entry.hash, node);
-        //     Ok(())
-        // })?;
-        //
-        // let trie_mem =
-        //     TrieMemory { page_trie: TrieNode::Blinded { commitment: serialized.root }, trie_cache };
-        //
-        // Ok(trie_mem)
+        let serialized = Vec::<u8>::deserialize(deserializer)?;
+        let page_trie = TrieNode::<Page>::decode(&mut serialized.as_ref())
+            .map_err(|e| serde::de::Error::custom(format!("Failed to decode trie node: {}", e)))?;
+
+        Ok(TrieMemory { page_trie })
     }
 }
 
 /// A reader for the [TrieMemory] structure.
 ///
-/// Enables unaligned verbatim reads from the [TrieMemory]'s pages. If the pages for the address space requested are
-/// not present, the reader will return zeroed out data for that region, rather than fail.
+/// Enables unaligned verbatim reads from the [TrieMemory]'s pages. If the pages for the address
+/// space requested are not present, the reader will return zeroed out data for that region, rather
+/// than fail.
 pub struct MemoryReader<'a> {
     memory: &'a mut TrieMemory,
     address: Address,
@@ -566,28 +527,25 @@ mod test {
         assert_eq!(right_page, &[0xFF; PAGE_SIZE]);
     }
 
-    // #[test]
-    // fn test_serialize_deserialize_roundtrip() {
-    //     let mut trie_mem = TrieMemory::default();
-    //
-    //     let cursor = Cursor::new(vec![0xFF; 2]);
-    //     trie_mem.set_memory_range(0, cursor).unwrap();
-    //
-    //     // Perform a roudntrip serialization and deserialization of the trie memory.
-    //     let serialized = serde_json::to_string(&trie_mem).unwrap();
-    //     let mut deserialized: TrieMemory = serde_json::from_str(&serialized).unwrap();
-    //
-    //     // Merkleize the original trie memory.
-    //     trie_mem.merkleize();
-    //
-    //     // Ensure that the deserialized trie memory is equivalent to the original, when merkleized.
-    //     assert_eq!(trie_mem, deserialized);
-    //
-    //     // Ensure that data may still be retrieved from the deserialized trie memory.
-    //     let word = deserialized.get_word(0).unwrap();
-    //     assert_eq!(word, 0xFF_FF_00_00);
-    //
-    //     // Ensure that the deserialized trie memory still has the 1 page.
-    //     assert_eq!(deserialized.page_count(), 1);
-    // }
+    #[test]
+    fn test_serialize_deserialize_roundtrip() {
+        let mut trie_mem = TrieMemory::default();
+
+        let cursor = Cursor::new(vec![0xFF; 2]);
+        trie_mem.set_memory_range(0, cursor).unwrap();
+
+        // Perform a roudntrip serialization and deserialization of the trie memory.
+        let serialized = serde_json::to_string(&trie_mem).unwrap();
+        let mut deserialized: TrieMemory = serde_json::from_str(&serialized).unwrap();
+
+        // Ensure that the deserialized trie memory is equivalent to the original, when merkleized.
+        assert_eq!(trie_mem, deserialized);
+
+        // Ensure that data may still be retrieved from the deserialized trie memory.
+        let word = deserialized.get_word(0).unwrap();
+        assert_eq!(word, 0xFF_FF_00_00);
+
+        // Ensure that the deserialized trie memory still has the 1 page.
+        assert_eq!(deserialized.page_count(), 1);
+    }
 }

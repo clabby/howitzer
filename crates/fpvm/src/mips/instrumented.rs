@@ -78,10 +78,12 @@ where
         // state transition.
         let mut witness = proof
             .then(|| {
-                // let instruction_proof = self.state.memory.merkle_proof(self.state.pc as Address)?;
+                // let instruction_proof = self.state.memory.merkle_proof(self.state.pc as
+                // Address)?;
 
-                let mut mem_proof = vec![0; MEMORY_PROOF_SIZE * 32 * 2];
-                // mem_proof[0..MEMORY_PROOF_SIZE * 32].copy_from_slice(instruction_proof.as_slice());
+                let mem_proof = vec![0; MEMORY_PROOF_SIZE * 32 * 2];
+                // mem_proof[0..MEMORY_PROOF_SIZE *
+                // 32].copy_from_slice(instruction_proof.as_slice());
                 Ok::<_, anyhow::Error>(StepWitness {
                     state: self.state.encode_witness()?,
                     mem_proof,
@@ -251,7 +253,7 @@ mod test {
                 println!("pc: 0x{:x} symbol name: {}", ins.state.pc, symbol);
             }
             last_symbol = Some(symbol);
-            
+
             if ins.state.exited {
                 break;
             }

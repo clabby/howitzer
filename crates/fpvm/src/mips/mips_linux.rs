@@ -117,10 +117,9 @@ where
 
                         let mut out_mem = memory.to_be_bytes();
                         out_mem[alignment..alignment + data_len].copy_from_slice(&data[..data_len]);
-                        self.state.memory.set_doubleword(
-                            effective_address,
-                            u64::from_be_bytes(out_mem),
-                        )?;
+                        self.state
+                            .memory
+                            .set_doubleword(effective_address, u64::from_be_bytes(out_mem))?;
                         self.state.preimage_offset += data_len as u64;
                         v0 = data_len as DoubleWord;
                     }
@@ -180,10 +179,8 @@ where
                         let effective_address = a1 & 0xFFFFFFFFFFFFFFF8;
                         self.track_mem_access(effective_address as Address)?;
 
-                        let memory = self
-                            .state
-                            .memory
-                            .get_doubleword(effective_address as Address)?;
+                        let memory =
+                            self.state.memory.get_doubleword(effective_address as Address)?;
                         let mut key = self.state.preimage_key;
                         let alignment = a1 & 0x7;
                         let space = 8 - alignment;
