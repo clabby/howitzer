@@ -12,7 +12,6 @@
   </a>
   <img src="https://img.shields.io/badge/License-MIT-green.svg?label=license" alt="License">
   <a href="https://github.com/ethereum-optimism/monorepo"><img src="https://img.shields.io/badge/OP%20Stack-monorepo-red" alt="OP Stack"></a>
-  <a href="https://t.me/+2yfSX0YikWMxNTRh"><img src="https://img.shields.io/badge/Telegram-x?logo=telegram&label=anton-rs%20contributors"></a>
 </p>
 
 <p align="center">
@@ -39,7 +38,8 @@ _TL;DR:_
 - It's Rust code
 - ...that was [originally Go code][cannon]
 - ...that runs an EVM
-- ...emulating a MIPS machine
+- ...emulating a MIPS64 machine
+- ...that was originally a MIPS32 machine
 - ...running [compiled Go code][op-program]
 - ...that runs an EVM
 
@@ -71,22 +71,19 @@ To get started, a few dependencies are required:
 ### Testing
 
 ```sh
-# With `cargo-nextest`
-cargo +nightly nextest run --release --all --all-features
-# Without `cargo-nextest`
-cargo +nightly t --release --all --all-features
+just test
 ```
 
 ### Linting and Formatting
 
 ```sh
-cargo +nightly fmt --all -- && cargo +nightly clippy --all --all-features -- -D warnings
+just lint
 ```
 
 ### Running Benchmarks
 
 ```sh
-cargo +nightly bench --all --all-features
+just bench
 ```
 
 ## Documentation

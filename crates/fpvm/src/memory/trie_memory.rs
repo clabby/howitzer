@@ -368,13 +368,7 @@ mod test {
         let cursor = Cursor::new(vec![0xFF; PAGE_SIZE * 2]);
         trie_mem.set_memory_range(0, cursor).unwrap();
 
-        let proof = trie_mem.merkle_proof(0xFF).unwrap();
-
-        dbg!(&proof);
-        proof.iter().for_each(|node| {
-            dbg!(node.len());
-        });
-
+        trie_mem.merkle_proof(0xFF).unwrap();
         trie_mem.merkleize();
 
         // Ensure data may still be retrieved from the page where the proof points to.
