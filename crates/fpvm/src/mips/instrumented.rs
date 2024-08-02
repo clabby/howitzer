@@ -2,9 +2,10 @@
 
 use super::mips_isa::DoubleWord;
 use crate::{
-    memory::{Address, MEMORY_PROOF_SIZE},
+    memory::Address,
     state::{State, StepWitness},
 };
+use alloy_primitives::Bytes;
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::io::{BufWriter, Write};
@@ -25,12 +26,14 @@ where
     pub(crate) std_out: BufWriter<O>,
     /// The MIPS thread context's stderr buffer.
     pub(crate) std_err: BufWriter<E>,
-    /// The last address we accessed in memory.
-    pub(crate) last_mem_access: Option<Address>,
+
     /// Whether or not the memory proof generation is enabled.
     pub(crate) mem_proof_enabled: bool,
+    /// The last address we accessed in memory.
+    pub(crate) last_mem_access: Option<Address>,
     /// The memory proof, if it is enabled.
-    pub(crate) mem_proof: [u8; MEMORY_PROOF_SIZE * 32],
+    pub(crate) mem_proof: Option<Vec<Bytes>>,
+
     /// The [PreimageOracle] used to fetch preimages.
     pub(crate) preimage_oracle: P,
     /// Cached pre-image data, including 8 byte length prefix
@@ -55,7 +58,7 @@ where
             std_err: BufWriter::new(std_err),
             last_mem_access: None,
             mem_proof_enabled: false,
-            mem_proof: [0u8; MEMORY_PROOF_SIZE * 32],
+            mem_proof: Default::default(),
             preimage_oracle: oracle,
             last_preimage: Vec::default(),
             last_preimage_key: [0u8; 32],
@@ -78,15 +81,16 @@ where
         // state transition.
         let mut witness = proof
             .then(|| {
-                // let instruction_proof = self.state.memory.merkle_proof(self.state.pc as
-                // Address)?;
+                // Generate a merkle proof for the page containing the current instruction.
+                let instruction_proof = self.state.memory.merkle_proof(self.state.pc as Address)?;
 
-                let mem_proof = vec![0; MEMORY_PROOF_SIZE * 32 * 2];
-                // mem_proof[0..MEMORY_PROOF_SIZE *
-                // 32].copy_from_slice(instruction_proof.as_slice());
+                // Allocate the proof vector and push the instruction proof.
+                let mut proof = Vec::with_capacity(2);
+                proof.push(instruction_proof);
+
                 Ok::<_, anyhow::Error>(StepWitness {
                     state: self.state.encode_witness()?,
-                    mem_proof,
+                    proof,
                     ..Default::default()
                 })
             })
@@ -99,7 +103,10 @@ where
         // preimage read within the state transition.
         if proof {
             witness = witness.map(|mut wit| {
-                wit.mem_proof[MEMORY_PROOF_SIZE * 32..].copy_from_slice(self.mem_proof.as_slice());
+                if let Some(mem_proof) = self.mem_proof.take() {
+                    wit.proof.push(mem_proof);
+                }
+
                 if self.last_preimage_offset.is_some() {
                     wit.preimage_key = Some(self.last_preimage_key);
                     wit.preimage_value = Some(self.last_preimage.clone());

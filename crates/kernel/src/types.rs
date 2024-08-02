@@ -1,5 +1,6 @@
 //! This module contains the types for the `howitzer` interface.
 
+use alloy_primitives::Bytes;
 use howitzer_fpvm::state::StateWitness;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +13,7 @@ pub struct Proof {
     pub post: [u8; 32],
     #[serde(with = "howitzer_fpvm::utils::ser::state_witness_hex")]
     pub state_data: StateWitness,
-    pub proof_data: Vec<u8>,
+    pub proof_data: Vec<Vec<Bytes>>,
     pub step_input: Vec<u8>,
     pub oracle_key: Option<Vec<u8>>,
     pub oracle_value: Option<Vec<u8>>,

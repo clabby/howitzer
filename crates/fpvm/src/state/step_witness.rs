@@ -1,7 +1,6 @@
 //! This module contains the various witness types.
 
 use super::{StateWitness, STATE_WITNESS_SIZE};
-use crate::memory::MEMORY_PROOF_SIZE;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_sol_types::{sol, SolCall};
 use kona_preimage::PreimageKeyType;
@@ -9,11 +8,12 @@ use kona_preimage::PreimageKeyType;
 /// A [StepWitness] is produced after each instruction step of the MIPS emulator. It contains
 /// the encoded [StateWitness], the proof of memory access, and the preimage key, value, and
 /// offset.
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StepWitness {
     /// The encoded state witness
     pub state: StateWitness,
     /// The proof of memory access
-    pub mem_proof: Vec<u8>,
+    pub proof: Vec<Vec<Bytes>>,
     /// The preimage key
     pub preimage_key: Option<[u8; 32]>,
     /// The preimage value
@@ -26,7 +26,7 @@ impl Default for StepWitness {
     fn default() -> Self {
         Self {
             state: [0u8; STATE_WITNESS_SIZE],
-            mem_proof: Vec::with_capacity(MEMORY_PROOF_SIZE * 32 * 2),
+            proof: Vec::with_capacity(2),
             preimage_key: Default::default(),
             preimage_value: Default::default(),
             preimage_offset: Default::default(),
@@ -104,8 +104,8 @@ impl StepWitness {
     pub fn encode_step_input(&self) -> Bytes {
         let call = stepCall {
             _0: self.state.to_vec().into(),
-            _1: self.mem_proof.to_vec().into(),
-            _2: B256::ZERO, // constant local context
+            _1: Default::default(), // TODO: Load proof
+            _2: B256::ZERO,         // constant local context
         };
 
         call.abi_encode().into()

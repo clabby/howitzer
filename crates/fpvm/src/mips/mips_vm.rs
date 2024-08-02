@@ -664,7 +664,7 @@ where
                 "Unexpected last memory access with existing access buffered."
             );
             self.last_mem_access = Some(effective_address);
-            // self.mem_proof = self.state.memory.merkle_proof(effective_address)?;
+            self.mem_proof = Some(self.state.memory.merkle_proof(effective_address)?);
         }
         Ok(())
     }

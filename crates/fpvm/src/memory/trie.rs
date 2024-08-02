@@ -48,8 +48,8 @@ pub(crate) const EMPTY_ROOT_HASH: B256 =
 /// allowing for RLP encoding and decoding of the types for storage and retrieval. The
 /// implementation of these traits will not blind the child nodes of the [TrieNode].
 ///
-/// The [Self::root] function will merkle-encode the [TrieNode] recursively and return the hash of the
-/// encoded bytes.
+/// The [Self::root] function will merkle-encode the [TrieNode] recursively and return the hash of
+/// the encoded bytes.
 ///
 /// ## SAFETY
 /// As this implementation only supports uniform key sizes, the [TrieNode] data structure will fail
@@ -393,12 +393,10 @@ where
                 }
                 encoded_key_len + node.length()
             }
-            TrieNode::Branch { stack, .. } => {
-                stack.iter().fold(0, |mut acc, node| {
-                    acc += node.length();
-                    acc
-                })
-            }
+            TrieNode::Branch { stack, .. } => stack.iter().fold(0, |mut acc, node| {
+                acc += node.length();
+                acc
+            }),
         }
     }
 
@@ -428,7 +426,11 @@ where
                 // that are longer than 32 bytes in length.
                 Header { list: true, payload_length }.encode(out);
                 stack.iter_mut().for_each(|node| {
-                    node.root().encode(out);
+                    if matches!(node, TrieNode::Empty) {
+                        out.put_u8(EMPTY_STRING_CODE)
+                    } else {
+                        node.root().encode(out)
+                    };
                 });
             }
         }
@@ -464,23 +466,17 @@ where
                 }
                 encoded_key_len + value.length()
             }
-            TrieNode::Extension { prefix, node, .. } => {
+            TrieNode::Extension { prefix, .. } => {
                 let mut encoded_key_len = prefix.len() / 2 + 1;
                 if encoded_key_len != 1 {
                     encoded_key_len += length_of_length(encoded_key_len);
                 }
-                encoded_key_len + node.merkle_encoding_length()
+                encoded_key_len + B256::ZERO.length()
             }
-            TrieNode::Branch { stack, .. } => {
-                // In branch nodes, if an element is longer than an encoded 32 byte string, it is
-                // blinded. Assuming we have an open trie node, we must re-hash the
-                // elements that are longer than an encoded 32 byte string
-                // in length.
-                stack.iter().fold(0, |mut acc, node| {
-                    acc += node.merkle_encoding_length();
-                    acc
-                })
-            }
+            TrieNode::Branch { stack, .. } => stack.iter().fold(0, |mut acc, node| {
+                acc += if matches!(node, TrieNode::Empty) { 1 } else { B256::ZERO.length() };
+                acc
+            }),
         }
     }
 

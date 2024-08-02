@@ -157,7 +157,7 @@ where
                                 post: poststate_hash,
                                 state_data: step_witness.state,
                                 step_input: step_witness.encode_step_input().to_vec(),
-                                proof_data: step_witness.mem_proof,
+                                proof_data: step_witness.proof,
                                 oracle_input: preimage_input.map(|k| k.to_vec()),
                                 oracle_key: step_witness.preimage_key.map(|k| k.to_vec()),
                                 oracle_value: step_witness.preimage_value,
