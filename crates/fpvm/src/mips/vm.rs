@@ -1,10 +1,10 @@
 //! This module contains the MIPS VM implementation for the [InstrumentedState].
 
-use super::mips_isa::{
+use super::isa::{
     DoubleWord, IType, JType, Opcode, RType, RegImmFunction, Special2Function, SpecialFunction,
     Word,
 };
-use crate::{memory::Address, utils::sign_extend, InstrumentedState};
+use crate::{memory::Address, mips::InstrumentedState, utils::sign_extend};
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::io::Write;
@@ -649,13 +649,15 @@ where
         Ok(())
     }
 
-    /// Track an access to [crate::Memory] at the given [Address].
+    /// Track an access to [TrieMemory] at the given [Address].
     ///
     /// ### Takes
-    /// - `effective_address`: The address in [crate::Memory] being accessed.
+    /// - `effective_address`: The address in [TrieMemory] being accessed.
     ///
     /// ### Returns
     /// - A [Result] indicating if the operation was successful.
+    ///
+    /// [TrieMemory]: crate::memory::TrieMemory
     #[inline]
     pub(crate) fn track_mem_access(&mut self, effective_address: Address) -> Result<()> {
         if self.mem_proof_enabled && self.last_mem_access != Some(effective_address) {

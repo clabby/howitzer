@@ -1,3 +1,5 @@
+//! Contains a utility for parsing ELF metadata.
+
 use crate::memory::Address;
 use anyhow::{anyhow, Result};
 use elf::{endian::AnyEndian, ElfBytes};
@@ -30,7 +32,7 @@ impl Meta {
     /// ## Returns
     /// - `Ok(Meta)` if the parsing was successful.
     /// - `Err(_)` if the parsing failed.
-    pub fn from_elf(elf: ElfBytes<AnyEndian>) -> Result<Self> {
+    pub fn from_elf(elf: ElfBytes<'_, AnyEndian>) -> Result<Self> {
         let (parsing_table, string_table) =
             elf.symbol_table()?.ok_or_else(|| anyhow!("No segments found"))?;
 

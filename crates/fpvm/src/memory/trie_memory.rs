@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     memory::page::{PAGE_ADDRESS_MASK, PAGE_ADDRESS_SIZE, PAGE_SIZE},
-    mips::mips_isa::{DoubleWord, Word},
+    mips::isa::{DoubleWord, Word},
 };
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
@@ -235,11 +235,11 @@ impl TrieMemory {
         }
     }
 
-    /// Returns a human-readable string describing the size of the [Memory].
+    /// Returns a human-readable string describing the size of the [TrieMemory].
     ///
     /// ## Returns
-    /// - A human-readable string describing the size of the [Memory] in B, KiB, MiB, GiB, TiB, PiB,
-    ///   or EiB.
+    /// - A human-readable string describing the size of the [TrieMemory] in B, KiB, MiB, GiB, TiB,
+    ///   PiB, or EiB.
     pub fn usage(&self) -> String {
         let total = (self.page_count() * PAGE_SIZE) as u64;
         const UNIT: u64 = 1024;
@@ -288,6 +288,7 @@ impl<'de> Deserialize<'de> for TrieMemory {
 /// Enables unaligned verbatim reads from the [TrieMemory]'s pages. If the pages for the address
 /// space requested are not present, the reader will return zeroed out data for that region, rather
 /// than fail.
+#[derive(Debug)]
 pub struct MemoryReader<'a> {
     memory: &'a mut TrieMemory,
     address: Address,
@@ -295,6 +296,8 @@ pub struct MemoryReader<'a> {
 }
 
 impl<'a> MemoryReader<'a> {
+    /// Create a new [MemoryReader] for the given [TrieMemory] structure that can read
+    /// `count` bytes starting from `address`.
     pub fn new(memory: &'a mut TrieMemory, address: Address, count: u64) -> Self {
         Self { memory, address, count }
     }
@@ -335,7 +338,7 @@ mod test {
     use super::TrieMemory;
     use crate::{
         memory::{trie_memory::PAGE_SIZE, Address},
-        mips::mips_isa::{DoubleWord, Word},
+        mips::isa::{DoubleWord, Word},
     };
     use alloy_trie::EMPTY_ROOT_HASH;
     use std::io::Cursor;

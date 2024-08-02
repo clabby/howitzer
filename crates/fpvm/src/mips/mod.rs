@@ -3,11 +3,9 @@
 mod instrumented;
 pub use instrumented::InstrumentedState;
 
-pub(crate) mod mips_vm;
-
-pub(crate) mod mips_isa;
-
-pub(crate) mod mips_linux;
+pub mod isa;
+pub mod linux;
+pub mod vm;
 
 /// Defines an enum type with underlying [u32] representation on variants, and a [TryFrom]
 /// implementation automatically generated.
@@ -18,7 +16,10 @@ macro_rules! def_enum {
         #[allow(clippy::upper_case_acronyms)]
         #[repr(u32)]
         pub enum $enum {
-            $( $variant = $value ),*
+            $(
+                #[doc = concat!(stringify!($variant), " = ", stringify!($value))]
+                $variant = $value
+            ),*
         }
 
         impl TryFrom<u32> for $enum {

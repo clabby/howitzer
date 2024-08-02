@@ -26,7 +26,7 @@ jobs:
   cargo-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    name: fmt-clippy
+    name: lint
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -38,8 +38,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: fmt + clippy
-        run: just clippy
+      - name: lint
+        run: just lint
   cargo-build-benches:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -54,7 +54,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: build benches
-        run: cargo bench --no-run --workspace --all
+        run: cargo bench --no-run --workspace --all --all-features
   cargo-build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -70,19 +70,3 @@ jobs:
           cache-on-failure: true
       - name: build
         run: cargo build --workspace --all --all-targets --all-features
-  # cargo-doc:
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 20
-  #   steps:
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v4
-  #     - uses: taiki-e/install-action@just
-  #     - name: Install Rust stable toolchain
-  #       uses: dtolnay/rust-toolchain@stable
-  #     - uses: Swatinem/rust-cache@v2
-  #       with:
-  #         cache-on-failure: true
-  #     - name: doclint
-  #       run: just lint-docs
-  #     - name: doctest
-  #       run: just test-docs

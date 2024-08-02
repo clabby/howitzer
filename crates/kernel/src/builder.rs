@@ -2,7 +2,7 @@
 
 use crate::{gz, Kernel, ProcessPreimageOracle};
 use anyhow::{anyhow, Result};
-use howitzer_fpvm::{state::State, InstrumentedState};
+use howitzer_fpvm::{mips::InstrumentedState, state::State};
 use std::{
     fs::{self, File},
     io::{self, BufReader, Read, Stderr, Stdout},

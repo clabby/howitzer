@@ -1,14 +1,23 @@
 //! This module contains the [Page] type as well as associated page parameterization constants.
 
-/// An index of a [Page] within a [TrieMemory] structure.
-pub(crate) type PageIndex = u64;
+/// An index of a [Page] within an [Address].
+///
+/// [Address]: super::Address
+pub type PageIndex = u64;
 
 /// A page of memory, representing [PAGE_SIZE] bytes of data.
-pub(crate) type Page = [u8; PAGE_SIZE];
+pub type Page = [u8; PAGE_SIZE];
 
-pub(crate) const PAGE_ADDRESS_SIZE: usize = 12;
-pub(crate) const PAGE_SIZE: usize = 1 << PAGE_ADDRESS_SIZE;
-pub(crate) const PAGE_ADDRESS_MASK: usize = PAGE_SIZE - 1;
+/// The size of a page address in bits.
+pub const PAGE_ADDRESS_SIZE: usize = 12;
+
+/// The size of a [Page] in bytes.
+pub const PAGE_SIZE: usize = 1 << PAGE_ADDRESS_SIZE;
+
+/// The mask to apply to an [Address] to obtain the page address.
+///
+/// [Address]: super::Address
+pub const PAGE_ADDRESS_MASK: usize = PAGE_SIZE - 1;
 
 /// An empty page of memory, zeroed out.
 pub(crate) const EMPTY_PAGE: Page = [0u8; PAGE_SIZE];

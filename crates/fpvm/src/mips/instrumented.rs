@@ -1,6 +1,6 @@
 //! This module contains the [InstrumentedState] definition.
 
-use super::mips_isa::DoubleWord;
+use super::isa::DoubleWord;
 use crate::{
     memory::Address,
     state::{State, StepWitness},
@@ -14,6 +14,7 @@ use std::io::{BufWriter, Write};
 /// the input and output buffers, and an implementation of the MIPS VM.
 ///
 /// To perform an instruction step on the MIPS emulator, use the [InstrumentedState::step] method.
+#[derive(Debug)]
 pub struct InstrumentedState<O, E, P>
 where
     O: Write,
@@ -34,7 +35,7 @@ where
     /// The memory proof, if it is enabled.
     pub(crate) mem_proof: Option<Vec<Bytes>>,
 
-    /// The [PreimageOracle] used to fetch preimages.
+    /// The [HintRouter] + [PreimageFetcher] used to fetch preimages.
     pub(crate) preimage_oracle: P,
     /// Cached pre-image data, including 8 byte length prefix
     pub(crate) last_preimage: Vec<u8>,
@@ -51,6 +52,7 @@ where
     E: Write,
     P: HintRouter + PreimageFetcher,
 {
+    /// Create a new [InstrumentedState].
     pub fn new(state: State, oracle: P, std_out: O, std_err: E) -> Self {
         Self {
             state,
@@ -134,13 +136,13 @@ where
 mod test {
     use crate::{
         memory::Address,
+        mips::InstrumentedState,
         state::State,
         test_utils::{ClaimTestOracle, StaticOracle, BASE_ADDR_END, END_ADDR},
         utils::{
             meta::Meta,
             patch::{load_elf, patch_go, patch_stack},
         },
-        InstrumentedState,
     };
     use elf::{endian::AnyEndian, ElfBytes};
     use std::{

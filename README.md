@@ -17,21 +17,17 @@
 <p align="center">
   <a href="#whats-a-howitzer">What's a Howitzer?</a> •
   <a href="#overview">Overview</a> •
-  <a href="#credits">Credits</a> •
-  <a href="#benchmarks">Benchmarks</a> •
+  <a href="#docker">Docker</a> •
   <a href="#contributing">Contributing</a> •
   <a href="#documentation">Documentation</a> •
-  <a href="#docker">Docker</a>
+  <a href="#credits">Credits</a>
 </p>
 
 ## What's a Howitzer?
 
-Howitzer is an emulator designed to simulate a single MIPS thread context on the EVM. Its primary use is to execute the [`op-program`][op-program]
-(also known as the fault-proof program) for the [OP Stack][monorepo]'s interactive dispute protocol. The `op-program` consists
-of a stripped down version of `op-geth`'s state transition code in addition to the derivation pipeline, and produces deterministic results.
-Subsequently, it is compiled to MIPS to be ran on top of Howitzer on-chain to prove fault in claims about the state of L2 on L1. Howitzer also has a
-native implementation of the MIPS thread context that mirrors the on-chain version, which enables the [op-challenger][op-challenger] to generate
-state commitments for an `op-program` execution trace and participate in dispute games.
+Howitzer is a MIPS64 emulator designed to simulate deterministic execution within a single MIPS thread context both
+natively and on the EVM. Its primary objective is to execute [Fault Proof Programs][fpp-specs] such as [`kona`][kona]
+or [`op-program`][op-program] for the sake of the [OP Stack][monorepo]'s interactive dispute protocol.
 
 _TL;DR:_
 
@@ -40,24 +36,20 @@ _TL;DR:_
 - ...that runs an EVM
 - ...emulating a MIPS64 machine
 - ...that was originally a MIPS32 machine
-- ...running [compiled Go code][op-program]
+- ...running compiled [Rust][kona] or [Go][op-program] code
 - ...that runs an EVM
 
 ## Overview
 
+- [`howitzer`](./bin) - The binary for executing MIPS64 programs natively on top of Howitzer with a detached preimage server.
+- [`howitzer-kernel`](./crates/kernel) - High-level library for running the Howitzer FPVM with a detached preimage server.
 - [`howitzer-fpvm`](./crates/fpvm) - Contains the native implementation of the MIPS thread context emulator.
-- [`howitzer-contracts`](https://github.com/ethereum-optimism/optimism/tree/develop/packages/contracts-bedrock/src/cannon) - [*in OP monorepo*] Contains the Solidity implementation of the MIPS thread context and the Preimage Oracle. (TODO: Will be replaced with Howitzer contracts, as the VM architectures will differ.)
+- [`howitzer-contracts`](./contracts) - Contains the EVM implementation of the MIPS thread context emulator.
 
-## Credits
+## Docker
 
-This repository is heavily inspired by the original [Cannon][cannon], built by [George Hotz][geohot] and members of the [OP Labs][op-labs] team. The original implementation is written in Go, and can be found [in the Optimism monorepo][cannon]. All
-credits for the original idea and reference implementation of this concept go to these folks.
-
-## Benchmarks
-
-### `howitzer-fpvm` benchmarks
-
-_TODO_
+The docker image for `howitzer` is located in the [docker](./docker) directory, and can be built using the
+script provided.
 
 ## Contributing
 
@@ -65,6 +57,7 @@ To get started, a few dependencies are required:
 
 - [Rust toolchain][rustup]
   - Recommended: [`cargo-nextest`][nextest]
+- [Just][just]
 - [Go toolchain][golang]
 - [binutils][binutils]
 
@@ -97,20 +90,23 @@ The specification for both Cannon and the preimage oracle can be found in the [O
 - [Cannon specification][cannon-specs]
 - [Preimage oracle specification][fpp-specs]
 
-## Docker
+## Credits
 
-The docker image for `howitzer` is located in the [docker](./docker) directory, and can be built using the
-script provided.
+This repository is heavily inspired by the original [Cannon][cannon] VM, built by [George Hotz][geohot] and members of the
+[OP Labs][op-labs] team. The original implementation is written in Go, and can be found [in the Optimism monorepo][cannon]. All
+credits for the original idea and reference implementation of this concept go to these folks.
 
 [geohot]: https://github.com/geohot
 [op-labs]: https://oplabs.co
 [monorepo]: https://github.com/ethereum-optimism/optimism
 [cannon]: https://github.com/ethereum-optimism/optimism/tree/develop/cannon
+[kona]: https://github.com/ethereum-optimism/kona
 [op-program]: https://github.com/ethereum-optimism/optimism/tree/develop/op-program
 [op-challenger]: https://github.com/ethereum-optimism/optimism/tree/develop/op-challenger
+[fpp-specs]: https://specs.optimism.io/fault-proof/index.html
+[cannon-specs]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/cannon-fault-proof-vm.md
 [rustup]: https://rustup.rs/
 [golang]: https://go.dev/doc/install
 [binutils]: https://www.gnu.org/software/binutils/
 [nextest]: https://nexte.st/
-[fpp-specs]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/fault-proof.md
-[cannon-specs]: https://github.com/ethereum-optimism/optimism/blob/develop/specs/cannon-fault-proof-vm.md
+[just]: https://github.com/casey/just
