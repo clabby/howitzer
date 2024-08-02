@@ -124,7 +124,7 @@ pub fn patch_go(raw: &[u8], state: &mut State) -> Result<()> {
             )?;
         } else if name == "runtime.MemProfileRate" {
             // disable mem profiling, to avoid a lot of unnecessary floating point ops
-            state.memory.set_memory_doubleword(symbol.st_value, 0)?;
+            state.memory.set_doubleword(symbol.st_value, 0)?;
         }
     }
     Ok(())
@@ -151,7 +151,7 @@ pub fn patch_stack(state: &mut State) -> Result<()> {
 
     #[inline(always)]
     fn store_mem(st: &mut State, address: Address, value: u64) -> Result<()> {
-        st.memory.set_memory_doubleword(address, value)
+        st.memory.set_doubleword(address, value)
     }
 
     store_mem(state, ptr + 8, 0x42)?; // argc = 0 (argument count)

@@ -1,6 +1,7 @@
 //! This module contains the data structure for the state of the MIPS emulator.
 
-use crate::{memory::Memory, utils::keccak256};
+use crate::memory::TrieMemory;
+use alloy_primitives::keccak256;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -38,7 +39,7 @@ pub enum VMStatus {
 #[serde(rename_all = "camelCase")]
 pub struct State {
     /// The [Memory] of the emulated MIPS thread context.
-    pub memory: Memory,
+    pub memory: TrieMemory,
     /// The preimage key for the given state.
     #[serde(with = "crate::utils::ser::fixed_32_hex")]
     pub preimage_key: [u8; 32],
@@ -74,7 +75,7 @@ impl State {
     /// - A [Result] containing the encoded [StateWitness] or an error if the encoding failed.
     pub fn encode_witness(&mut self) -> Result<StateWitness> {
         let mut witness: StateWitness = [0u8; STATE_WITNESS_SIZE];
-        witness[..32].copy_from_slice(self.memory.merkle_root()?.as_slice());
+        witness[..32].copy_from_slice(self.memory.merkleize().as_ref());
         witness[32..64].copy_from_slice(self.preimage_key.as_slice());
         witness[64..72].copy_from_slice(&self.preimage_offset.to_be_bytes());
         witness[72..80].copy_from_slice(&self.pc.to_be_bytes());
@@ -108,10 +109,8 @@ impl State {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        state::{state_hash, State, STATE_WITNESS_SIZE},
-        utils::keccak256,
-    };
+    use crate::state::{state_hash, State, STATE_WITNESS_SIZE};
+    use alloy_primitives::keccak256;
 
     #[test]
     fn test_state_hash() {
@@ -134,7 +133,7 @@ mod test {
             assert_eq!(actual_witness.len(), STATE_WITNESS_SIZE);
 
             let mut expected_witness = [0u8; STATE_WITNESS_SIZE];
-            let mem_root = state.memory.merkle_root().unwrap();
+            let mem_root = state.memory.merkleize();
             expected_witness[..32].copy_from_slice(mem_root.as_slice());
             expected_witness[32 * 2 + 8 * 6] = exit_code;
             expected_witness[32 * 2 + 8 * 6 + 1] = exited as u8;

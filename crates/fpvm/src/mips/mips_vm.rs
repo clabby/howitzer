@@ -33,7 +33,7 @@ where
         self.state.step += 1;
 
         // Fetch the instruction from memory and extract the opcode from the high-order 6 bits.
-        let instruction = self.state.memory.get_memory_word(self.state.pc as Address)?;
+        let instruction = self.state.memory.get_word(self.state.pc as Address)?;
         let opcode = Opcode::try_from(instruction >> 26)?;
 
         // Handle J-type - J/JAL
@@ -101,7 +101,7 @@ where
 
         if let Some(address) = store_address {
             self.track_mem_access(address)?;
-            self.state.memory.set_memory_doubleword(address, val)?;
+            self.state.memory.set_doubleword(address, val)?;
         }
 
         self.handle_rd(rd_reg_index, val, true)
@@ -319,7 +319,7 @@ where
 
         let address = rs_val & 0xFFFFFFFFFFFFFFF8;
         self.track_mem_access(address as Address)?;
-        let mem = self.state.memory.get_memory_doubleword(address as Address)?;
+        let mem = self.state.memory.get_doubleword(address as Address)?;
 
         match opcode {
             // MIPS32
@@ -664,7 +664,7 @@ where
                 "Unexpected last memory access with existing access buffered."
             );
             self.last_mem_access = Some(effective_address);
-            self.mem_proof = self.state.memory.merkle_proof(effective_address)?;
+            self.mem_proof = Some(self.state.memory.merkle_proof(effective_address)?);
         }
         Ok(())
     }
