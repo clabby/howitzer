@@ -198,6 +198,8 @@ mod test {
                     state.get_word((BASE_ADDR_END + 4) as Address).unwrap(),
                     state.get_word((BASE_ADDR_END + 8) as Address).unwrap(),
                 );
+                println!("{:?}", ins.state.registers);
+                println!("Done: {:?}, Result: {:?}", done, result);
                 assert_eq!(done, 1, "must set done to 1 {:?}", f.file_name());
                 assert_eq!(result, 1, "must have success result {:?}", f.file_name());
                 println!("Test passed: {:?}", f.file_name());

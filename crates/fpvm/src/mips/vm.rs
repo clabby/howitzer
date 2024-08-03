@@ -393,16 +393,25 @@ where
                 let mask = (WORD_MASK >> sr) << (32 - ((rs_val & 0x4) << 3));
                 Ok((0, Some(address), (mem & !mask) | val))
             }
-            Opcode::SW | Opcode::SC => {
+            Opcode::SW => {
                 let sl = 32 - ((rs_val & 0x4) << 3);
                 let val = (rt_val & WORD_MASK) << sl;
                 let mask = DOUBLEWORD_MASK ^ (WORD_MASK << sl);
 
-                if matches!(opcode, Opcode::SC) && instruction.rt != 0 {
-                    self.state.registers[instruction.rt as usize] = 1;
-                }
-
                 Ok((0, Some(address), (mem & mask) | val))
+            }
+            Opcode::SC => {
+                let sl = 32 - ((rs_val & 0x4) << 3);
+                let val = (rt_val & WORD_MASK) << sl;
+                let mask = DOUBLEWORD_MASK ^ (WORD_MASK << sl);
+
+                if instruction.rt != 0 {
+                    self.state.registers[instruction.rt as usize] = 1;
+                    Ok((0, Some(address), (mem & mask) | val))
+                } else {
+                    // Conditional failed; Perform no write, indicate failure.
+                    Ok((0, None, 0))
+                }
             }
             Opcode::SWR => {
                 let sl = 24 - ((rs_val & 0x3) << 3);
@@ -441,14 +450,23 @@ where
                 (mem >> (32 - ((rs_val & 0x4) << 3))) & WORD_MASK,
             )),
             Opcode::LD | Opcode::LLD => Ok((instruction.rt as usize, None, mem)),
-            Opcode::SD | Opcode::SCD => {
+            Opcode::SCD => {
                 let shift_left = (rs_val & 0x7) << 3;
                 let val = rt_val << shift_left;
                 let mask = u64::MAX << shift_left;
 
-                if matches!(opcode, Opcode::SCD) && instruction.rt != 0 {
+                if instruction.rt != 0 {
                     self.state.registers[instruction.rt as usize] = 1;
+                    Ok((0, Some(address), (mem & !mask) | val))
+                } else {
+                    // Conditional failed; Perform no write, indicate failure.
+                    Ok((0, None, 0))
                 }
+            }
+            Opcode::SD => {
+                let shift_left = (rs_val & 0x7) << 3;
+                let val = rt_val << shift_left;
+                let mask = u64::MAX << shift_left;
 
                 Ok((0, Some(address), (mem & !mask) | val))
             }
