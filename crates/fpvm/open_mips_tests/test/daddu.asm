@@ -12,8 +12,9 @@
 
 
     .section .test, "x"
-    .balign 4
+    .balign 8
     .set    noreorder
+    .set    mips64
     .global test
     .ent    test
 test:

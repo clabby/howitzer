@@ -281,7 +281,9 @@ where
     ) -> Result<DoubleWord> {
         match opcode {
             // MIPS32
-            Opcode::ADDI | Opcode::ADDIU => Ok(sign_extend(((rs_val as u32) + (rt_val as u32)) as u64,  32)),
+            Opcode::ADDI | Opcode::ADDIU => {
+                Ok(sign_extend(((rs_val as u32) + (rt_val as u32)) as u64, 32))
+            }
             Opcode::SLTI => Ok(((rs_val as i64) < (rt_val as i64)) as u64),
             Opcode::SLTIU => Ok((rs_val < rt_val) as u64),
             Opcode::ANDI => Ok(rs_val & rt_val),
@@ -345,9 +347,9 @@ where
                 // Pull the bytes into the upper part of the word
                 let val = mem << sl;
                 // Create a mask for the untouched part of the dest register
-                let mask = WORD_MASK >> (32 - sl);
+                let mask = WORD_MASK << sl;
                 // Merge the values
-                let merged = (val | (rt_val & mask)) & WORD_MASK;
+                let merged = (val | (rt_val & !mask)) & WORD_MASK;
                 Ok((instruction.rt as usize, None, sign_extend(merged, 32)))
             }
             Opcode::LW | Opcode::LL => Ok((
@@ -410,14 +412,28 @@ where
             }
             // MIPS64
             Opcode::SDL => {
-                let val = rt_val >> ((rs_val & 0x7) << 3);
-                let mask = u64::MAX >> ((rs_val & 0x7) << 3);
-                Ok((0, Some(address), (mem & !mask) | val))
+                // Compute the number of bytes to the closest 8-byte aligned
+                // offset, to the right of the unaligned offset.
+                let sr = (rs_val & 0x7) << 3;
+                // Pull the bytes into the lower part of the word
+                let val = rt_val >> sr;
+                // Create a mask for the untouched part of the dest doubleword
+                let mask = DOUBLEWORD_MASK >> sr;
+                // Merge the values
+                let merged = val | (mem & !mask);
+                Ok((0, Some(address), merged))
             }
             Opcode::SDR => {
-                let val = rt_val << (56 - ((rs_val & 0x7) << 3));
-                let mask = u64::MAX << (56 - ((rs_val & 0x7) << 3));
-                Ok((0, Some(address), (mem & !mask) | val))
+                // Compute the number of bytes to the closest 8-byte aligned
+                // offset, to the left of the unaligned offset.
+                let sl = 56 - ((rs_val & 0x7) << 3);
+                // Pull the bytes into the higher part of the word
+                let val = rt_val << sl;
+                // Create a mask for the untouched part of the dest doubleword
+                let mask = DOUBLEWORD_MASK << sl;
+                // Merge the values
+                let merged = val | (mem & !mask);
+                Ok((0, Some(address), merged))
             }
             Opcode::LWU => Ok((
                 instruction.rt as usize,
