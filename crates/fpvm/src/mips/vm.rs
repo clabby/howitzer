@@ -281,7 +281,7 @@ where
     ) -> Result<DoubleWord> {
         match opcode {
             // MIPS32
-            Opcode::ADDI | Opcode::ADDIU => Ok(sign_extend(rs_val + rt_val, 32)),
+            Opcode::ADDI | Opcode::ADDIU => Ok(sign_extend(((rs_val as u32) + (rt_val as u32)) as u64,  32)),
             Opcode::SLTI => Ok(((rs_val as i64) < (rt_val as i64)) as u64),
             Opcode::SLTIU => Ok((rs_val < rt_val) as u64),
             Opcode::ANDI => Ok(rs_val & rt_val),

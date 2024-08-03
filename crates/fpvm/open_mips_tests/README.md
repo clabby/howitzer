@@ -6,5 +6,12 @@ OpenMIPS is licensed LGPLv3 (as seen in the root of the repository), see [`LICEN
 Note that some build-system files from 2014/2015 in that repository by the same author are marked as BSD licensed,
 but the build-system is not used here.
 
-Requires https://github.com/sergev/LiteBSD/releases/download/tools/gcc-4.8.1-mips-macosx.tgz to build
+## Building
 
+**Requirements**:
+
+- Docker
+
+```sh
+just make-tests
+```
