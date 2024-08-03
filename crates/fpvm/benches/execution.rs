@@ -1,8 +1,8 @@
 use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 use howitzer_fpvm::{
+    mips::InstrumentedState,
     test_utils::{ClaimTestOracle, StaticOracle},
     utils::patch::{load_elf, patch_go, patch_stack},
-    InstrumentedState,
 };
 use kona_preimage::{HintRouter, PreimageFetcher};
 use pprof::criterion::{Output, PProfProfiler};

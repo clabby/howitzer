@@ -1,4 +1,4 @@
-//! This module contains the [PreimageServer] struct and its associated methods.
+//! This module contains the [ProcessPreimageOracle] struct and its associated methods.
 
 use crate::utils::NativePipeFiles;
 use anyhow::Result;
@@ -26,8 +26,8 @@ pub struct ProcessPreimageOracle {
 }
 
 impl ProcessPreimageOracle {
-    /// Creates a new [PreimageServer] from the given [OracleClient] and [HintWriter] and starts
-    /// the server process.
+    /// Creates a new [ProcessPreimageOracle] from the given [OracleReader] and [HintWriter] and
+    /// starts the server process.
     pub fn start(
         cmd: PathBuf,
         args: &[String],

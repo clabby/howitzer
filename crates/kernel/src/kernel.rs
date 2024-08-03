@@ -2,7 +2,7 @@
 
 use crate::{gz::compress_bytes, types::Proof};
 use anyhow::{anyhow, Result};
-use howitzer_fpvm::{state::state_hash, InstrumentedState};
+use howitzer_fpvm::{mips::InstrumentedState, state::state_hash};
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::{
     fs::File,
@@ -13,7 +13,7 @@ use std::{
 use tokio::{runtime::Runtime, task::JoinHandle};
 
 /// The [Kernel] struct contains the configuration for a Howitzer kernel as well as
-/// the [PreimageOracle] and [InstrumentedState] instances that form it.
+/// the [HintRouter] + [PreimageFetcher] and [InstrumentedState] instances that form it.
 #[allow(dead_code)]
 pub struct Kernel<O, E, P>
 where

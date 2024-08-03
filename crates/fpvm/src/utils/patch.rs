@@ -170,6 +170,7 @@ pub fn patch_stack(state: &mut State) -> Result<()> {
 
 /// A multi reader is a reader that reads from the first reader until it returns 0, then reads from
 /// the second reader.
+#[derive(Debug)]
 pub struct MultiReader<R1: Read, R2: Read>(R1, R2);
 
 impl<R1: Read, R2: Read> Read for MultiReader<R1, R2> {

@@ -1,5 +1,7 @@
 //! Testing utilities.
 
+#![allow(missing_docs)]
+
 use alloy_primitives::{hex, keccak256, B512};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -13,7 +15,7 @@ pub const BASE_ADDR_END: u64 = 0xFF_FF_FF_FF_BF_FF_FF_F0;
 /// Used as the return-address for tests
 pub const END_ADDR: u64 = 0xA7_EF_00_D0;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct StaticOracle {
     preimage_data: Vec<u8>,
 }
@@ -39,6 +41,7 @@ impl PreimageFetcher for StaticOracle {
     }
 }
 
+#[derive(Debug)]
 pub struct ClaimTestOracle {
     images: Arc<Mutex<HashMap<PreimageKey, Vec<u8>>>>,
 }

@@ -1,0 +1,36 @@
+name: Solidity CI
+on:
+  push:
+    branches: [main]
+  merge_group:
+  pull_request:
+env:
+  FOUNDRY_PROFILE: ci
+jobs:
+  check:
+    name: lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+      - name: Run Forge build
+        working-directory: ./contracts
+        run: |
+          forge --version
+          forge build --sizes
+        id: build
+      - name: Run Forge fmt
+        working-directory: ./contracts
+        run: |
+          forge fmt --check
+        id: fmt
+      - name: Run Forge tests
+        working-directory: ./contracts
+        run: |
+          forge test -vvv
+        id: test

@@ -232,7 +232,7 @@ def_enum!(RegImmFunction {
 
 #[cfg(test)]
 mod test {
-    use crate::mips::mips_isa::{IType, JType, RType};
+    use crate::mips::isa::{IType, JType, RType};
 
     #[test]
     fn decode_j_type() {

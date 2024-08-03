@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// The size of an encoded [StateWitness] in bytes.
 pub const STATE_WITNESS_SIZE: usize = 378;
 
-/// A [StateWitness] is an encoded commitment to the current [crate::State] of the MIPS emulator.
+/// A [StateWitness] is an encoded commitment to the current [State] of the MIPS emulator.
 pub type StateWitness = [u8; STATE_WITNESS_SIZE];
 
 /// Compute the hash of the [StateWitness]
@@ -23,22 +23,29 @@ pub fn state_hash(witness: StateWitness) -> [u8; 32] {
 
 /// The [VMStatus] is an indicator within the [StateWitness] hash that indicates
 /// the current status of the MIPS emulator.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum VMStatus {
+    /// The VM exited successfully, and the computation was valid.
     Valid = 0,
+    /// The VM exited successfully, and the computation was invalid.
     Invalid = 1,
+    /// The program panicked.
     Panic = 2,
+    /// The program is still running.
     Unfinished = 3,
 }
 
 /// The [State] struct contains the internal model of the MIPS emulator state.
 ///
 /// The [State] by itself does not contain functionality for performing instruction steps
-/// or executing the MIPS emulator. For this, use the [crate::InstrumentedState] struct.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// or executing the MIPS emulator. For this, use the [InstrumentedState] struct.
+///
+/// [InstrumentedState]: crate::mips::InstrumentedState
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct State {
-    /// The [Memory] of the emulated MIPS thread context.
+    /// The memory of the emulated MIPS thread context.
     pub memory: TrieMemory,
     /// The preimage key for the given state.
     #[serde(with = "crate::utils::ser::fixed_32_hex")]

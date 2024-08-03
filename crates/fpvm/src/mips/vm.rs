@@ -1,10 +1,10 @@
 //! This module contains the MIPS VM implementation for the [InstrumentedState].
 
-use super::mips_isa::{
+use super::isa::{
     DoubleWord, IType, JType, Opcode, RType, RegImmFunction, Special2Function, SpecialFunction,
     Word,
 };
-use crate::{memory::Address, utils::sign_extend, InstrumentedState};
+use crate::{memory::Address, mips::InstrumentedState, utils::sign_extend};
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::io::Write;
@@ -281,7 +281,9 @@ where
     ) -> Result<DoubleWord> {
         match opcode {
             // MIPS32
-            Opcode::ADDI | Opcode::ADDIU => Ok(sign_extend(rs_val + rt_val, 32)),
+            Opcode::ADDI | Opcode::ADDIU => {
+                Ok(sign_extend(((rs_val as u32) + (rt_val as u32)) as u64, 32))
+            }
             Opcode::SLTI => Ok(((rs_val as i64) < (rt_val as i64)) as u64),
             Opcode::SLTIU => Ok((rs_val < rt_val) as u64),
             Opcode::ANDI => Ok(rs_val & rt_val),
@@ -345,9 +347,9 @@ where
                 // Pull the bytes into the upper part of the word
                 let val = mem << sl;
                 // Create a mask for the untouched part of the dest register
-                let mask = WORD_MASK >> (32 - sl);
+                let mask = WORD_MASK << sl;
                 // Merge the values
-                let merged = (val | (rt_val & mask)) & WORD_MASK;
+                let merged = (val | (rt_val & !mask)) & WORD_MASK;
                 Ok((instruction.rt as usize, None, sign_extend(merged, 32)))
             }
             Opcode::LW | Opcode::LL => Ok((
@@ -391,16 +393,25 @@ where
                 let mask = (WORD_MASK >> sr) << (32 - ((rs_val & 0x4) << 3));
                 Ok((0, Some(address), (mem & !mask) | val))
             }
-            Opcode::SW | Opcode::SC => {
+            Opcode::SW => {
                 let sl = 32 - ((rs_val & 0x4) << 3);
                 let val = (rt_val & WORD_MASK) << sl;
                 let mask = DOUBLEWORD_MASK ^ (WORD_MASK << sl);
 
-                if matches!(opcode, Opcode::SC) && instruction.rt != 0 {
-                    self.state.registers[instruction.rt as usize] = 1;
-                }
-
                 Ok((0, Some(address), (mem & mask) | val))
+            }
+            Opcode::SC => {
+                let sl = 32 - ((rs_val & 0x4) << 3);
+                let val = (rt_val & WORD_MASK) << sl;
+                let mask = DOUBLEWORD_MASK ^ (WORD_MASK << sl);
+
+                if instruction.rt != 0 {
+                    self.state.registers[instruction.rt as usize] = 1;
+                    Ok((0, Some(address), (mem & mask) | val))
+                } else {
+                    // Conditional failed; Perform no write, indicate failure.
+                    Ok((0, None, 0))
+                }
             }
             Opcode::SWR => {
                 let sl = 24 - ((rs_val & 0x3) << 3);
@@ -410,14 +421,28 @@ where
             }
             // MIPS64
             Opcode::SDL => {
-                let val = rt_val >> ((rs_val & 0x7) << 3);
-                let mask = u64::MAX >> ((rs_val & 0x7) << 3);
-                Ok((0, Some(address), (mem & !mask) | val))
+                // Compute the number of bytes to the closest 8-byte aligned
+                // offset, to the right of the unaligned offset.
+                let sr = (rs_val & 0x7) << 3;
+                // Pull the bytes into the lower part of the word
+                let val = rt_val >> sr;
+                // Create a mask for the untouched part of the dest doubleword
+                let mask = DOUBLEWORD_MASK >> sr;
+                // Merge the values
+                let merged = val | (mem & !mask);
+                Ok((0, Some(address), merged))
             }
             Opcode::SDR => {
-                let val = rt_val << (56 - ((rs_val & 0x7) << 3));
-                let mask = u64::MAX << (56 - ((rs_val & 0x7) << 3));
-                Ok((0, Some(address), (mem & !mask) | val))
+                // Compute the number of bytes to the closest 8-byte aligned
+                // offset, to the left of the unaligned offset.
+                let sl = 56 - ((rs_val & 0x7) << 3);
+                // Pull the bytes into the higher part of the word
+                let val = rt_val << sl;
+                // Create a mask for the untouched part of the dest doubleword
+                let mask = DOUBLEWORD_MASK << sl;
+                // Merge the values
+                let merged = val | (mem & !mask);
+                Ok((0, Some(address), merged))
             }
             Opcode::LWU => Ok((
                 instruction.rt as usize,
@@ -425,14 +450,23 @@ where
                 (mem >> (32 - ((rs_val & 0x4) << 3))) & WORD_MASK,
             )),
             Opcode::LD | Opcode::LLD => Ok((instruction.rt as usize, None, mem)),
-            Opcode::SD | Opcode::SCD => {
+            Opcode::SCD => {
                 let shift_left = (rs_val & 0x7) << 3;
                 let val = rt_val << shift_left;
                 let mask = u64::MAX << shift_left;
 
-                if matches!(opcode, Opcode::SCD) && instruction.rt != 0 {
+                if instruction.rt != 0 {
                     self.state.registers[instruction.rt as usize] = 1;
+                    Ok((0, Some(address), (mem & !mask) | val))
+                } else {
+                    // Conditional failed; Perform no write, indicate failure.
+                    Ok((0, None, 0))
                 }
+            }
+            Opcode::SD => {
+                let shift_left = (rs_val & 0x7) << 3;
+                let val = rt_val << shift_left;
+                let mask = u64::MAX << shift_left;
 
                 Ok((0, Some(address), (mem & !mask) | val))
             }
@@ -649,13 +683,15 @@ where
         Ok(())
     }
 
-    /// Track an access to [crate::Memory] at the given [Address].
+    /// Track an access to [TrieMemory] at the given [Address].
     ///
     /// ### Takes
-    /// - `effective_address`: The address in [crate::Memory] being accessed.
+    /// - `effective_address`: The address in [TrieMemory] being accessed.
     ///
     /// ### Returns
     /// - A [Result] indicating if the operation was successful.
+    ///
+    /// [TrieMemory]: crate::memory::TrieMemory
     #[inline]
     pub(crate) fn track_mem_access(&mut self, effective_address: Address) -> Result<()> {
         if self.mem_proof_enabled && self.last_mem_access != Some(effective_address) {

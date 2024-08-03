@@ -5,20 +5,20 @@
 
 use super::{
     def_enum,
-    mips_isa::{DoubleWord, Word},
+    isa::{DoubleWord, Word},
 };
 use crate::{
     memory::{page, Address, MemoryReader},
-    InstrumentedState,
+    mips::InstrumentedState,
 };
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::io::{self, BufReader, Read, Write};
 
-/// https://www.cs.cmu.edu/afs/club/usr/jhutz/project/Linux/src/include/asm-mips/errno.h
+/// [MIPS Syscall Definitions](https://www.cs.cmu.edu/afs/club/usr/jhutz/project/Linux/src/include/asm-mips/errno.h)
 const MIPS_EBADF: u64 = 0x9;
 
-/// https://www.cs.cmu.edu/afs/club/usr/jhutz/project/Linux/src/include/asm-mips/errno.h
+/// [MIPS Syscall Definitions](https://www.cs.cmu.edu/afs/club/usr/jhutz/project/Linux/src/include/asm-mips/errno.h)
 const MIPS_EINVAL: u64 = 0x16;
 
 def_enum!(Fd {
@@ -237,7 +237,7 @@ where
         Ok(())
     }
 
-    /// Read the preimage for the given key and offset from the [PreimageOracle] server.
+    /// Read the preimage for the given key and offset from the preimage server.
     ///
     /// ### Takes
     /// - `key`: The key of the preimage (the preimage's [alloy_primitives::keccak256] digest).
