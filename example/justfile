@@ -1,0 +1,9 @@
+elf:
+  #!/bin/bash
+  for d in */ ; do
+    myarray=(`find $d -maxdepth 1 -name "*.elf"`)
+    if [ ${#myarray[@]} -eq 0 ]; then 
+        (cd $d && GOOS=linux GOARCH=mips64 GOMIPS64=softfloat GODEBUG=gcstoptheworld=1 go build -o ../bin/$(basename $d).elf .)
+        echo "Built $(basename $d).elf"
+    fi
+  done
