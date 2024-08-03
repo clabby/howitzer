@@ -1,6 +1,6 @@
 //! The [KernelBuilder] struct is a helper for building a [Kernel] struct.
 
-use crate::{gz, Kernel, ProcessPreimageOracle};
+use crate::{gz, utils::bidirectional_pipe, Kernel, ProcessPreimageOracle};
 use anyhow::{anyhow, Result};
 use howitzer_fpvm::{mips::InstrumentedState, state::State};
 use std::{
@@ -49,16 +49,16 @@ impl KernelBuilder {
         let raw_state = fs::read(&self.input)?;
         let state: State = serde_json::from_slice(&gz::decompress_bytes(&raw_state)?)?;
 
-        let (preimage_pipe, hint_pipe, pipe_fds) = crate::utils::create_native_pipes()?;
+        let (hint_cl_rw, hint_oracle_rw) = bidirectional_pipe()?;
+        let (pre_cl_rw, pre_oracle_rw) = bidirectional_pipe()?;
 
         // TODO(clabby): Allow for the preimage server to be configurable.
         let cmd = self.preimage_server.split(' ').map(String::from).collect::<Vec<_>>();
         let (oracle, server_proc) = ProcessPreimageOracle::start(
             PathBuf::from(cmd.first().ok_or(anyhow!("Missing preimage server binary path"))?),
             &cmd[1..],
-            preimage_pipe,
-            hint_pipe,
-            pipe_fds,
+            (hint_cl_rw, pre_cl_rw),
+            (hint_oracle_rw, pre_oracle_rw)
         )?;
 
         // TODO(clabby): Allow for the stdout / stderr to be configurable.

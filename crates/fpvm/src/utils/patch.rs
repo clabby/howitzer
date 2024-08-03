@@ -127,6 +127,7 @@ pub fn patch_go(raw: &[u8], state: &mut State) -> Result<()> {
             state.memory.set_doubleword(symbol.st_value, 0)?;
         }
     }
+
     Ok(())
 }
 

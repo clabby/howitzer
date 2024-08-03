@@ -22,16 +22,16 @@ use std::{
 #[command(author, version, about)]
 pub(crate) struct LoadElfArgs {
     /// The path to the input 32-bit big-endian MIPS ELF file.
-    #[arg(long)]
-    path: PathBuf,
+    #[arg(long, short)]
+    input: PathBuf,
 
     /// The type of patch to perform on the ELF file.
-    #[arg(long, default_values = ["go", "stack"])]
+    #[arg(long, short, default_values = ["go", "stack"])]
     patch_kind: Vec<PatchKind>,
 
     /// The output path to write the JSON state to. State will be dumped to stdout if set to `-`.
     /// Not written if not provided.
-    #[arg(long)]
+    #[arg(long, short)]
     output: Option<String>,
 }
 
@@ -64,8 +64,8 @@ impl Display for PatchKind {
 
 impl HowitzerSubcommandDispatcher for LoadElfArgs {
     fn dispatch(self) -> Result<()> {
-        tracing::info!(target: "howitzer-cli::load-elf", "Loading ELF file @ {}", self.path.display());
-        let file = File::open(&self.path)?;
+        tracing::info!(target: "howitzer-cli::load-elf", "Loading ELF file @ {}", self.input.display());
+        let file = File::open(&self.input)?;
         let file_sz = file.metadata()?.len();
         let mut reader = BufReader::new(file);
         let mut elf_raw = Vec::with_capacity(file_sz as usize);
@@ -80,6 +80,8 @@ impl HowitzerSubcommandDispatcher for LoadElfArgs {
                 PatchKind::Stack => patch_stack(&mut state),
             }?;
         }
+
+        state.memory.flush_page_cache();
 
         if let Some(ref path_str) = self.output {
             if path_str == "-" {

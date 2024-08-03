@@ -16,11 +16,32 @@ use nybbles::Nibbles;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ActivePageCache([(Option<PageIndex>, Page); 2]);
+
+impl Default for ActivePageCache {
+    fn default() -> Self {
+        Self([(None, EMPTY_PAGE), (None, EMPTY_PAGE)])
+    }
+}
+
+impl ActivePageCache {
+    pub fn inner(&self) -> &[(Option<PageIndex>, Page); 2] {
+        &self.0
+    }
+
+    pub fn inner_mut(&mut self) -> &mut [(Option<PageIndex>, Page); 2] {
+        &mut self.0
+    }
+}
+
 /// [TrieMemory] is a hexary radix trie based memory implementation.
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct TrieMemory {
     /// The page trie
     page_trie: TrieNode<Page>,
+    /// The active page cache
+    page_cache: ActivePageCache,
 }
 
 impl TrieMemory {
@@ -36,6 +57,8 @@ impl TrieMemory {
     /// - `Ok(merkle_root)` if the memory trie was successfully merkleized.
     /// - `Err(_)` if the memory trie could not be merkleized.
     pub fn merkleize(&mut self) -> B256 {
+        self.flush_page_cache();
+
         self.page_trie.root()
     }
 
@@ -47,6 +70,8 @@ impl TrieMemory {
     /// ## Returns
     /// - A list of merkle proof nodes for the [Page] containing the [Address].
     pub fn merkle_proof(&mut self, address: Address) -> Result<Vec<Bytes>> {
+        self.flush_page_cache();
+
         let page_index = address >> PAGE_ADDRESS_SIZE;
         self.page_trie.proof(&Nibbles::unpack(page_index.to_be_bytes()))
     }
@@ -80,9 +105,30 @@ impl TrieMemory {
     /// - `Ok(None)` if the page was not found.
     /// - `Err(_)` if an error occurred during the lookup.
     pub fn page_lookup(&mut self, page_index: PageIndex, invalidate: bool) -> Option<&mut Page> {
+        let page_cache = self.page_cache.inner_mut();
+
+        // Consult the cache before fetching from the trie.
+        for (i, (cache_page_idx, _)) in page_cache.iter_mut().enumerate() {
+            if cache_page_idx.map(|idx| idx == page_index).unwrap_or_default() {
+                return Some(&mut page_cache[i].1);
+            }
+        }
+
+        // Flush the first page in the cache ring to the trie, if it is valid.
+        if let Some(old_page_index) = page_cache[1].0 {
+            let old_page_index_nibbles = Nibbles::unpack(old_page_index.to_be_bytes());
+            self.page_trie.insert(&old_page_index_nibbles, page_cache[1].1).ok()?;
+        }
+
         // Fetch the page from the trie.
         let page_index_nibbles = Nibbles::unpack(page_index.to_be_bytes());
-        self.page_trie.open(&page_index_nibbles, invalidate).ok().flatten()
+        let page = self.page_trie.open(&page_index_nibbles, invalidate).ok().flatten()?;
+
+        // Rotate the cache ring
+        page_cache[1] = page_cache[0];
+        page_cache[0] = (Some(page_index), *page);
+
+        Some(&mut page_cache[0].1)
     }
 
     /// Get a 32-bit [Word] from memory at a given 4-byte aligned address.
@@ -256,6 +302,16 @@ impl TrieMemory {
         }
         format!("{:.1} {}iB", (total as f64) / (div as f64), ['K', 'M', 'G', 'T', 'P', 'E'][exp])
     }
+
+    /// Flush the active page cache to the [TrieMemory].
+    pub fn flush_page_cache(&mut self) {
+        for (page_index, page) in self.page_cache.inner().iter() {
+            if let Some(page_index) = page_index {
+                let page_index_nibbles = Nibbles::unpack(page_index.to_be_bytes());
+                self.page_trie.insert(&page_index_nibbles, *page).unwrap();
+            }
+        }
+    }
 }
 
 impl Serialize for TrieMemory {
@@ -279,7 +335,7 @@ impl<'de> Deserialize<'de> for TrieMemory {
         let page_trie = TrieNode::<Page>::decode(&mut serialized.as_ref())
             .map_err(|e| serde::de::Error::custom(format!("Failed to decode trie node: {}", e)))?;
 
-        Ok(TrieMemory { page_trie })
+        Ok(TrieMemory { page_trie, ..Default::default() })
     }
 }
 
@@ -503,7 +559,7 @@ mod test {
         let mut deserialized: TrieMemory = serde_json::from_str(&serialized).unwrap();
 
         // Ensure that the deserialized trie memory is equivalent to the original, when merkleized.
-        assert_eq!(trie_mem, deserialized);
+        assert_eq!(trie_mem.page_trie, deserialized.page_trie);
 
         // Ensure that data may still be retrieved from the deserialized trie memory.
         let word = deserialized.get_word(0).unwrap();

@@ -209,7 +209,7 @@ where
                     SpecialFunction::DSLLV => Some(rt_val << (rs_val & 0x3F)),
                     SpecialFunction::DSRLV => Some(rt_val >> (rs_val & 0x3F)),
                     SpecialFunction::DSRAV => Some(((rt_val as i64) >> (rs_val & 0x3F)) as u64),
-                    SpecialFunction::DMULTU | SpecialFunction::DDIVU | SpecialFunction::DDIV => {
+                    SpecialFunction::DMULT | SpecialFunction::DMULTU | SpecialFunction::DDIVU | SpecialFunction::DDIV => {
                         self.handle_hi_lo(funct, rs_val, rt_val, instruction.rd as usize)?;
                         None
                     }
@@ -238,6 +238,7 @@ where
             Opcode::SPECIAL2 => {
                 let funct = Special2Function::try_from(instruction.funct)?;
                 match funct {
+                    // MIPS32
                     Special2Function::MUL => {
                         Some(sign_extend(((rs_val as i32) * (rt_val as i32)) as u64, 32))
                     }
@@ -253,6 +254,10 @@ where
                             i += 1;
                         }
                         Some(i)
+                    }
+                    // MIPS64
+                    Special2Function::DCLZ => {
+                        Some(rs_val.leading_zeros() as u64)
                     }
                 }
             }
@@ -420,6 +425,30 @@ where
                 Ok((0, Some(address), (mem & !mask) | val))
             }
             // MIPS64
+            Opcode::LDL => {
+                // Grab the # of bytes to load from the word
+                // This is the distance to the nearest aligned offset * 8
+                let sl = (rs_val & 0x7) << 3;
+                // Pull the bytes into the upper part of the word
+                let val = mem << sl;
+                // Create a mask for the untouched part of the dest register
+                let mask = DOUBLEWORD_MASK << sl;
+                // Merge the values
+                let merged = val | (rt_val & !mask);
+                Ok((instruction.rt as usize, None, merged))
+            }
+            Opcode::LDR => {
+                // Grab the # of bytes to load from the word
+                // This is the distance to the nearest aligned offset * 8
+                let sr = 56 - ((rs_val & 0x7) << 3);
+                // Pull the bytes into the lower part of the word
+                let val = mem >> sr;
+                // Create a mask for the untouched part of the dest register
+                let mask = DOUBLEWORD_MASK << (64 - sr);
+                // Merge the values
+                let merged = val | (rt_val & mask);
+                Ok((instruction.rt as usize, None, merged))
+            }
             Opcode::SDL => {
                 // Compute the number of bytes to the closest 8-byte aligned
                 // offset, to the right of the unaligned offset.
@@ -596,8 +625,14 @@ where
                 0
             }
             // MIPS64
+            SpecialFunction::DMULT => {
+                let acc = ((rs as i128) * (rt as i128)) as u128;
+
+                self.state.hi = (acc >> 64) as u64;
+                self.state.lo = acc as u64;
+                0
+            }
             SpecialFunction::DMULTU => {
-                // dmultu
                 let acc = (rs as u128) * (rt as u128);
 
                 self.state.hi = (acc >> 64) as u64;

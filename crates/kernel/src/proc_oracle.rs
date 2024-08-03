@@ -4,13 +4,15 @@ use crate::utils::NativePipeFiles;
 use anyhow::Result;
 use async_trait::async_trait;
 use command_fds::{CommandFdExt, FdMapping};
+use kona_common::FileDescriptor;
 use kona_preimage::{
     HintRouter, HintWriter, HintWriterClient, OracleReader, PipeHandle, PreimageFetcher,
     PreimageKey, PreimageOracleClient,
 };
+use os_pipe::{PipeReader, PipeWriter};
 use std::{
     io,
-    os::fd::AsRawFd,
+    os::fd::{AsFd, AsRawFd},
     path::PathBuf,
     process::{Child, Command},
 };
@@ -31,55 +33,46 @@ impl ProcessPreimageOracle {
     pub fn start(
         cmd: PathBuf,
         args: &[String],
-        preimage_pipe: PipeHandle,
-        hint_pipe: PipeHandle,
-        pipe_files: NativePipeFiles,
+        server_io: ((PipeReader, PipeWriter), (PipeReader, PipeWriter)),
+        client_io: ((PipeReader, PipeWriter), (PipeReader, PipeWriter)),
     ) -> Result<(Self, Option<Child>)> {
         let cmd_str = cmd.display().to_string();
         let child = (!cmd_str.is_empty()).then(|| {
-            tracing::info!(
-                "Starting preimage server process: {} {:?}",
-                cmd.display(),
-                args
-            );
-
             let mut command = Command::new(cmd);
             let command = {
-                // Grab the file descriptors for the hint and preimage channels
-                // that the server will use to communicate with the FPVM
-                let fds = [
-                    pipe_files.preimage_read.as_raw_fd(),
-                    pipe_files.preimage_write.as_raw_fd(),
-                    pipe_files.hint_read.as_raw_fd(),
-                    pipe_files.hint_write.as_raw_fd()
-                ];
-
-                tracing::info!(target: "howitzer::preimage::server", "Starting preimage server process: {:?} with fds {:?}", args, fds);
+                tracing::info!(target: "howitzer::preimage::server", "Starting preimage server process: {:?}", args);
 
                 command
                     .args(args)
-                    .stdout(io::stdout())
-                    .stderr(io::stderr())
-                    .fd_mappings(
-                        fds.iter().enumerate()
-                            .map(|(i, fd)| FdMapping {
-                                parent_fd: *fd,
-                                child_fd: 3 + i as i32,
-                            })
-                            .collect(),
-                    )?
+                    .fd_mappings(vec![
+                        FdMapping { parent_fd: io::stdin().as_fd().try_clone_to_owned().unwrap(), child_fd: 0 },
+                        FdMapping { parent_fd: io::stdout().as_fd().try_clone_to_owned().unwrap(), child_fd: 1 },
+                        FdMapping { parent_fd: io::stderr().as_fd().try_clone_to_owned().unwrap(), child_fd: 2 },
+                        FdMapping { parent_fd: server_io.0.0.try_clone().unwrap().into(), child_fd: 3 },
+                        FdMapping { parent_fd: server_io.0.1.try_clone().unwrap().into(), child_fd: 4 },
+                        FdMapping { parent_fd: server_io.1.0.try_clone().unwrap().into(), child_fd: 5 },
+                        FdMapping { parent_fd: server_io.1.1.try_clone().unwrap().into(), child_fd: 6 },
+                    ])?
             };
+
+            std::mem::forget(server_io);
 
             command.spawn().map_err(|e| anyhow::anyhow!("Failed to start preimage server process: {}", e))
         });
 
-        Ok((
-            Self {
-                hint_writer_client: HintWriter::new(hint_pipe),
-                preimage_client: OracleReader::new(preimage_pipe),
-            },
-            child.transpose()?,
-        ))
+        let oracle = Self {
+            hint_writer_client: HintWriter::new(PipeHandle::new(
+                FileDescriptor::Wildcard(client_io.0.0.as_raw_fd() as usize),
+                FileDescriptor::Wildcard(client_io.0.1.as_raw_fd() as usize),
+            )),
+            preimage_client: OracleReader::new(PipeHandle::new(
+                FileDescriptor::Wildcard(client_io.1.0.as_raw_fd() as usize),
+                FileDescriptor::Wildcard(client_io.1.1.as_raw_fd() as usize),
+            )),
+        };
+
+        std::mem::forget(client_io);
+        Ok((oracle, child.transpose()?))
     }
 }
 

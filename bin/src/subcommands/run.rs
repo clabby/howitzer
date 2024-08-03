@@ -14,11 +14,11 @@ pub(crate) struct RunArgs {
     preimage_server: String,
 
     /// The path to the input JSON state.
-    #[arg(long)]
+    #[arg(long, default_value = "state.json.gz")]
     input: String,
 
     /// The path to the output JSON state.
-    #[arg(long)]
+    #[arg(long, default_value = "out.json.gz")]
     output: Option<String>,
 
     /// The step to generate an output proof at.

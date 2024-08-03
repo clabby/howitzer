@@ -155,6 +155,8 @@ def_enum!(Opcode {
     // MIPS64
     DADDI = 0x18,
     DADDIU = 0x19,
+    LDL = 0x1A,
+    LDR = 0x1B,
     SDL = 0x2C,
     SDR = 0x2D,
     LWU = 0x27,
@@ -202,6 +204,7 @@ def_enum!(SpecialFunction {
     DSRLV = 0x16,
     DSRAV = 0x17,
     DDIV = 0x1E,
+    DMULT = 0x1C,
     DMULTU = 0x1D,
     DDIVU = 0x1F,
     DADD = 0x2C,
@@ -221,6 +224,8 @@ def_enum!(Special2Function {
     MUL = 0x02,
     CLO = 0x20,
     CLZ = 0x21,
+    // MIPS64
+    DCLZ = 0x24
 });
 
 def_enum!(RegImmFunction {
