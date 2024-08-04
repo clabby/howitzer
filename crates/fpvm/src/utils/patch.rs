@@ -1,7 +1,7 @@
 //! This module contains utilities for loading ELF files into [State] objects.
 
 use crate::{
-    memory::{page, Address},
+    memory::{page, Address, Memory},
     state::State,
 };
 use anyhow::Result;
@@ -35,10 +35,10 @@ pub(crate) const GO_SYMBOLS: [&str; 14] = [
 /// ### Returns
 /// - `Ok(state)` if the ELF file was loaded successfully
 /// - `Err(_)` if the ELF file could not be loaded
-pub fn load_elf(raw: &[u8]) -> Result<State> {
+pub fn load_elf<M: Memory>(raw: &[u8]) -> Result<State<M>> {
     let elf = ElfBytes::<AnyEndian>::minimal_parse(raw)?;
 
-    let mut state = State {
+    let mut state: State<M> = State {
         pc: elf.ehdr.e_entry,
         next_pc: elf.ehdr.e_entry + 4,
         heap: 0x10_00_00_00_00_00_00_00u64,
@@ -105,7 +105,7 @@ pub fn load_elf(raw: &[u8]) -> Result<State> {
 /// ### Returns
 /// - `Ok(())` if the patch was successful
 /// - `Err(_)` if the patch failed
-pub fn patch_go(raw: &[u8], state: &mut State) -> Result<()> {
+pub fn patch_go<M: Memory>(raw: &[u8], state: &mut State<M>) -> Result<()> {
     let elf = ElfBytes::<AnyEndian>::minimal_parse(raw)?;
     let (parsing_table, string_table) =
         elf.symbol_table()?.ok_or(anyhow::anyhow!("Failed to load ELF symbol table"))?;
@@ -139,7 +139,7 @@ pub fn patch_go(raw: &[u8], state: &mut State) -> Result<()> {
 /// ### Returns
 /// - `Ok(())` if the patch was successful
 /// - `Err(_)` if the patch failed
-pub fn patch_stack(state: &mut State) -> Result<()> {
+pub fn patch_stack<M: Memory>(state: &mut State<M>) -> Result<()> {
     // Setup stack pointer
     let ptr = 0x7F_FF_FF_FF_D0_00_u64;
 
@@ -151,7 +151,7 @@ pub fn patch_stack(state: &mut State) -> Result<()> {
     state.registers[29] = ptr;
 
     #[inline(always)]
-    fn store_mem(st: &mut State, address: Address, value: u64) -> Result<()> {
+    fn store_mem<M: Memory>(st: &mut State<M>, address: Address, value: u64) -> Result<()> {
         st.memory.set_doubleword(address, value)
     }
 

@@ -1,5 +1,6 @@
 use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 use howitzer_fpvm::{
+    memory::TrieMemory,
     mips::InstrumentedState,
     test_utils::{ClaimTestOracle, StaticOracle},
     utils::patch::{load_elf, patch_go, patch_stack},
@@ -16,7 +17,7 @@ fn bench_exec(
     compute_witness: bool,
     b: &mut Bencher,
 ) {
-    let mut state = load_elf(elf_bytes).unwrap();
+    let mut state = load_elf::<TrieMemory>(elf_bytes).unwrap();
     patch_go(elf_bytes, &mut state).unwrap();
     patch_stack(&mut state).unwrap();
 

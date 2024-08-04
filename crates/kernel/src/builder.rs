@@ -2,7 +2,8 @@
 
 use crate::{gz, utils::bidirectional_pipe, Kernel, ProcessPreimageOracle};
 use anyhow::{anyhow, Result};
-use howitzer_fpvm::{mips::InstrumentedState, state::State};
+use howitzer_fpvm::{memory::Memory, mips::InstrumentedState, state::State};
+use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File},
     io::{self, BufReader, Read, Stderr, Stdout},
@@ -37,7 +38,13 @@ impl KernelBuilder {
     /// Builds the [Kernel] struct from the information contained within the [KernelBuilder].
     ///
     /// TODO(clabby): Make the i/o streams + the preimage oracle configurable.
-    pub fn build(self) -> Result<Kernel<Stdout, Stderr, ProcessPreimageOracle>> {
+    pub fn build<M>(self) -> Result<Kernel<M, Stdout, Stderr, ProcessPreimageOracle>>
+    where
+        M: Memory + Serialize + Send + 'static,
+        <M as Memory>::Proof: Serialize + Send + 'static,
+        for<'de> M: Deserialize<'de>,
+        for<'de> <M as Memory>::Proof: Deserialize<'de>,
+    {
         // Read the compressed state dump from the input file, decompress it, and deserialize it.
         let f = File::open(&self.input)?;
         let f_sz = f.metadata()?.len();
@@ -47,7 +54,7 @@ impl KernelBuilder {
         let mut raw_state = Vec::with_capacity(f_sz as usize);
         reader.read_to_end(&mut raw_state)?;
         let raw_state = fs::read(&self.input)?;
-        let state: State = serde_json::from_slice(&gz::decompress_bytes(&raw_state)?)?;
+        let state: State<M> = serde_json::from_slice(&gz::decompress_bytes(&raw_state)?)?;
 
         let (hint_cl_rw, hint_oracle_rw) = bidirectional_pipe()?;
         let (pre_cl_rw, pre_oracle_rw) = bidirectional_pipe()?;
@@ -58,7 +65,7 @@ impl KernelBuilder {
             PathBuf::from(cmd.first().ok_or(anyhow!("Missing preimage server binary path"))?),
             &cmd[1..],
             (hint_cl_rw, pre_cl_rw),
-            (hint_oracle_rw, pre_oracle_rw)
+            (hint_oracle_rw, pre_oracle_rw),
         )?;
 
         // TODO(clabby): Allow for the stdout / stderr to be configurable.
@@ -67,7 +74,6 @@ impl KernelBuilder {
         Ok(Kernel::new(
             instrumented,
             server_proc,
-            self.input,
             self.output,
             self.proof_at,
             self.proof_format,

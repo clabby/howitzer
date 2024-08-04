@@ -3,6 +3,7 @@
 use super::HowitzerSubcommandDispatcher;
 use anyhow::Result;
 use clap::Args;
+use howitzer_fpvm::memory::TrieMemory;
 use howitzer_kernel::KernelBuilder;
 
 /// Command line arguments for `howitzer run`
@@ -59,7 +60,7 @@ impl HowitzerSubcommandDispatcher for RunArgs {
             .with_snapshot_format(self.snapshot_format)
             .with_stop_at(self.stop_at)
             .with_info_at(self.info_at)
-            .build()?;
+            .build::<TrieMemory>()?;
         kernel.run()
     }
 }

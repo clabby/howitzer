@@ -8,7 +8,7 @@ use super::{
     isa::{DoubleWord, Word},
 };
 use crate::{
-    memory::{page, Address, MemoryReader},
+    memory::{page, Address, Memory, MemoryReader},
     mips::InstrumentedState,
 };
 use anyhow::Result;
@@ -41,8 +41,9 @@ def_enum!(Syscall {
     Fcntl = 5070,
 });
 
-impl<O, E, P> InstrumentedState<O, E, P>
+impl<M, O, E, P> InstrumentedState<M, O, E, P>
 where
+    M: Memory,
     O: Write,
     E: Write,
     P: HintRouter + PreimageFetcher,
@@ -52,7 +53,7 @@ where
     /// ### Returns
     /// - `Ok(())` - The syscall was successfully handled.
     /// - `Err(_)` - An error occurred while handling the syscall.
-    #[inline]
+    #[inline(always)]
     pub(crate) async fn handle_syscall(&mut self) -> Result<()> {
         let mut v0 = 0;
         let mut v1 = 0;
@@ -246,7 +247,7 @@ where
     /// ### Returns
     /// - `Ok((data, data_len))`: The preimage data and length.
     /// - `Err(_)`: An error occurred while fetching the preimage.
-    #[inline]
+    #[inline(always)]
     pub(crate) async fn read_preimage(
         &mut self,
         key: [u8; 32],

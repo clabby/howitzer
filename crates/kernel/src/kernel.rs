@@ -2,8 +2,9 @@
 
 use crate::{gz::compress_bytes, types::Proof};
 use anyhow::{anyhow, Result};
-use howitzer_fpvm::{mips::InstrumentedState, state::state_hash};
+use howitzer_fpvm::{memory::Memory, mips::InstrumentedState, state::state_hash};
 use kona_preimage::{HintRouter, PreimageFetcher};
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -14,22 +15,20 @@ use tokio::{runtime::Runtime, task::JoinHandle};
 
 /// The [Kernel] struct contains the configuration for a Howitzer kernel as well as
 /// the [HintRouter] + [PreimageFetcher] and [InstrumentedState] instances that form it.
-#[allow(dead_code)]
-pub struct Kernel<O, E, P>
+pub struct Kernel<M, O, E, P>
 where
+    M: Memory,
     O: Write,
     E: Write,
     P: HintRouter + PreimageFetcher,
 {
     /// The instrumented state that the kernel will run.
-    ins_state: InstrumentedState<O, E, P>,
+    ins_state: InstrumentedState<M, O, E, P>,
     /// The server's process coupled with the preimage server's IO. We hold on to these so that
     /// they are not dropped until the kernel is dropped, preventing a broken pipe before the
     /// kernel is dropped. The other side of the bidirectional channel is owned by the
     /// [InstrumentedState], which is also dropped when the kernel is dropped.
     server_proc: Option<Child>,
-    /// The path to the input JSON state.
-    input: String,
     /// The path to the output JSON state.
     output: Option<String>,
     /// The step to generate an output proof at.
@@ -47,17 +46,20 @@ where
     info_at: Option<String>,
 }
 
-impl<O, E, P> Kernel<O, E, P>
+impl<M, O, E, P> Kernel<M, O, E, P>
 where
+    M: Memory + Serialize + 'static,
+    <M as Memory>::Proof: Serialize + Send,
     O: Write,
     E: Write,
     P: HintRouter + PreimageFetcher,
+    for<'de> M: Deserialize<'de>,
+    for<'de> <M as Memory>::Proof: Deserialize<'de>,
 {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        ins_state: InstrumentedState<O, E, P>,
+        ins_state: InstrumentedState<M, O, E, P>,
         server_proc: Option<Child>,
-        input: String,
         output: Option<String>,
         proof_at: Option<String>,
         proof_format: Option<String>,
@@ -69,7 +71,6 @@ where
         Self {
             ins_state,
             server_proc,
-            input,
             output,
             proof_at,
             proof_format,
@@ -151,7 +152,7 @@ where
                     io_tasks.push(tokio::task::spawn(async move {
                         let proof = {
                             let preimage_input = step_witness.encode_preimage_oracle_input();
-                            Proof {
+                            Proof::<M> {
                                 step,
                                 pre: prestate_hash,
                                 post: poststate_hash,

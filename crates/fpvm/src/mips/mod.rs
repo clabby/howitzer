@@ -3,6 +3,7 @@
 mod instrumented;
 pub use instrumented::InstrumentedState;
 
+pub mod error;
 pub mod isa;
 pub mod linux;
 pub mod vm;

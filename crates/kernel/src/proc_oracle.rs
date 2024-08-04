@@ -1,6 +1,5 @@
 //! This module contains the [ProcessPreimageOracle] struct and its associated methods.
 
-use crate::utils::NativePipeFiles;
 use anyhow::Result;
 use async_trait::async_trait;
 use command_fds::{CommandFdExt, FdMapping};
@@ -62,12 +61,12 @@ impl ProcessPreimageOracle {
 
         let oracle = Self {
             hint_writer_client: HintWriter::new(PipeHandle::new(
-                FileDescriptor::Wildcard(client_io.0.0.as_raw_fd() as usize),
-                FileDescriptor::Wildcard(client_io.0.1.as_raw_fd() as usize),
+                FileDescriptor::Wildcard(client_io.0 .0.as_raw_fd() as usize),
+                FileDescriptor::Wildcard(client_io.0 .1.as_raw_fd() as usize),
             )),
             preimage_client: OracleReader::new(PipeHandle::new(
-                FileDescriptor::Wildcard(client_io.1.0.as_raw_fd() as usize),
-                FileDescriptor::Wildcard(client_io.1.1.as_raw_fd() as usize),
+                FileDescriptor::Wildcard(client_io.1 .0.as_raw_fd() as usize),
+                FileDescriptor::Wildcard(client_io.1 .1.as_raw_fd() as usize),
             )),
         };
 

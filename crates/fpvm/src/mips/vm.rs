@@ -4,7 +4,11 @@ use super::isa::{
     DoubleWord, IType, JType, Opcode, RType, RegImmFunction, Special2Function, SpecialFunction,
     Word,
 };
-use crate::{memory::Address, mips::InstrumentedState, utils::sign_extend};
+use crate::{
+    memory::{Address, Memory},
+    mips::InstrumentedState,
+    utils::sign_extend,
+};
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::io::Write;
@@ -12,8 +16,9 @@ use std::io::Write;
 const DOUBLEWORD_MASK: DoubleWord = DoubleWord::MAX;
 const WORD_MASK: DoubleWord = Word::MAX as DoubleWord;
 
-impl<O, E, P> InstrumentedState<O, E, P>
+impl<M, O, E, P> InstrumentedState<M, O, E, P>
 where
+    M: Memory,
     O: Write,
     E: Write,
     P: HintRouter + PreimageFetcher,
@@ -22,7 +27,7 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the step was successful.
-    #[inline]
+    #[inline(always)]
     pub(crate) async fn inner_step(&mut self) -> Result<()> {
         // Return early if the program is already exited; There is no more work to do.
         if self.state.exited {
@@ -115,6 +120,7 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the special dispatch was successful.
+    #[inline(always)]
     pub(crate) async fn execute_special(
         &mut self,
         opcode: Opcode,
@@ -209,7 +215,10 @@ where
                     SpecialFunction::DSLLV => Some(rt_val << (rs_val & 0x3F)),
                     SpecialFunction::DSRLV => Some(rt_val >> (rs_val & 0x3F)),
                     SpecialFunction::DSRAV => Some(((rt_val as i64) >> (rs_val & 0x3F)) as u64),
-                    SpecialFunction::DMULT | SpecialFunction::DMULTU | SpecialFunction::DDIVU | SpecialFunction::DDIV => {
+                    SpecialFunction::DMULT |
+                    SpecialFunction::DMULTU |
+                    SpecialFunction::DDIVU |
+                    SpecialFunction::DDIV => {
                         self.handle_hi_lo(funct, rs_val, rt_val, instruction.rd as usize)?;
                         None
                     }
@@ -256,9 +265,7 @@ where
                         Some(i)
                     }
                     // MIPS64
-                    Special2Function::DCLZ => {
-                        Some(rs_val.leading_zeros() as u64)
-                    }
+                    Special2Function::DCLZ => Some(rs_val.leading_zeros() as u64),
                 }
             }
             _ => anyhow::bail!("Passed non-special opcode to execute_special: {opcode:?}"),
@@ -277,7 +284,7 @@ where
     /// ### Returns
     /// - `Ok(n)` - The result of the immediate ALU operation.
     /// - `Err(_)`: An error occurred while executing the immediate ALU operation.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn execute_immediate_alu(
         &mut self,
         opcode: Opcode,
@@ -314,7 +321,7 @@ where
     /// ### Returns
     /// - `Ok((rd_idx, Option<store_address>, value))` - The result of the instruction execution.
     /// - `Err(_)`: An error occurred while executing the instruction.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn execute_i_type(
         &mut self,
         opcode: Opcode,
@@ -513,7 +520,7 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the branch dispatch was successful.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn handle_branch(&mut self, opcode: Opcode, instruction: IType) -> Result<()> {
         if self.state.next_pc != self.state.pc + 4 {
             anyhow::bail!("Unexpected branch in delay slot at {:x}", self.state.pc,);
@@ -568,7 +575,7 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the branch dispatch was successful.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn handle_hi_lo(
         &mut self,
         fun: SpecialFunction,
@@ -674,7 +681,7 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the branch dispatch was successful.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn handle_jump(&mut self, link_reg: usize, dest: Address) -> Result<()> {
         if self.state.next_pc != self.state.pc + 4 {
             anyhow::bail!("Unexpected jump in delay slot at {:x}", self.state.pc);
@@ -698,7 +705,7 @@ where
     ///
     /// ### Returns
     /// - A [Result] indicating if the branch dispatch was successful.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn handle_rd(
         &mut self,
         store_reg: usize,
@@ -727,7 +734,7 @@ where
     /// - A [Result] indicating if the operation was successful.
     ///
     /// [TrieMemory]: crate::memory::TrieMemory
-    #[inline]
+    #[inline(always)]
     pub(crate) fn track_mem_access(&mut self, effective_address: Address) -> Result<()> {
         if self.mem_proof_enabled && self.last_mem_access != Some(effective_address) {
             anyhow::ensure!(
@@ -735,7 +742,7 @@ where
                 "Unexpected last memory access with existing access buffered."
             );
             self.last_mem_access = Some(effective_address);
-            self.mem_proof = Some(self.state.memory.merkle_proof(effective_address)?);
+            self.mem_proof = Some(self.state.memory.proof(effective_address)?);
         }
         Ok(())
     }

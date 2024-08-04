@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use howitzer_fpvm::memory::TrieMemory;
+use howitzer_fpvm::memory::{Memory, TrieMemory};
 use pprof::criterion::{Output, PProfProfiler};
 use rand::RngCore;
 
@@ -13,7 +13,7 @@ fn merkle_root(c: &mut Criterion) {
         rand::thread_rng().fill_bytes(&mut data[..]);
         memory.set_memory_range(0, &data[..]).expect("Should not error");
         b.iter(|| {
-            memory.merkleize();
+            memory.merkleize().unwrap();
         });
     });
 
@@ -23,7 +23,7 @@ fn merkle_root(c: &mut Criterion) {
         rand::thread_rng().fill_bytes(&mut data[..]);
         memory.set_memory_range(0, &data[..]).expect("Should not error");
         b.iter(|| {
-            memory.merkleize();
+            memory.merkleize().unwrap();
         });
     });
 
@@ -33,7 +33,7 @@ fn merkle_root(c: &mut Criterion) {
         rand::thread_rng().fill_bytes(&mut data[..]);
         memory.set_memory_range(0, &data[..]).expect("Should not error");
         b.iter(|| {
-            memory.merkleize();
+            memory.merkleize().unwrap();
         });
     });
 
@@ -43,7 +43,7 @@ fn merkle_root(c: &mut Criterion) {
         rand::thread_rng().fill_bytes(&mut data[..]);
         memory.set_memory_range(0, &data[..]).expect("Should not error");
         b.iter(|| {
-            memory.merkleize();
+            memory.merkleize().unwrap();
         });
     });
 }

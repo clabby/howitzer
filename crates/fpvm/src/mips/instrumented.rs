@@ -2,10 +2,9 @@
 
 use super::isa::DoubleWord;
 use crate::{
-    memory::Address,
+    memory::{Address, Memory},
     state::{State, StepWitness},
 };
-use alloy_primitives::Bytes;
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::io::{BufWriter, Write};
@@ -15,14 +14,15 @@ use std::io::{BufWriter, Write};
 ///
 /// To perform an instruction step on the MIPS emulator, use the [InstrumentedState::step] method.
 #[derive(Debug)]
-pub struct InstrumentedState<O, E, P>
+pub struct InstrumentedState<M, O, E, P>
 where
+    M: Memory,
     O: Write,
     E: Write,
     P: HintRouter + PreimageFetcher,
 {
     /// The inner [State] of the MIPS thread context.
-    pub state: State,
+    pub state: State<M>,
     /// The MIPS thread context's stdout buffer.
     pub(crate) std_out: BufWriter<O>,
     /// The MIPS thread context's stderr buffer.
@@ -33,7 +33,7 @@ where
     /// The last address we accessed in memory.
     pub(crate) last_mem_access: Option<Address>,
     /// The memory proof, if it is enabled.
-    pub(crate) mem_proof: Option<Vec<Bytes>>,
+    pub(crate) mem_proof: Option<M::Proof>,
 
     /// The [HintRouter] + [PreimageFetcher] used to fetch preimages.
     pub(crate) preimage_oracle: P,
@@ -46,14 +46,15 @@ where
     pub(crate) last_preimage_offset: Option<DoubleWord>,
 }
 
-impl<O, E, P> InstrumentedState<O, E, P>
+impl<M, O, E, P> InstrumentedState<M, O, E, P>
 where
+    M: Memory,
     O: Write,
     E: Write,
     P: HintRouter + PreimageFetcher,
 {
     /// Create a new [InstrumentedState].
-    pub fn new(state: State, oracle: P, std_out: O, std_err: E) -> Self {
+    pub fn new(state: State<M>, oracle: P, std_out: O, std_err: E) -> Self {
         Self {
             state,
             std_out: BufWriter::new(std_out),
@@ -73,52 +74,46 @@ where
     /// ### Returns
     /// - Ok(Some(witness)): The [StepWitness] for the current
     /// - Err(_): An error occurred while processing the instruction step in the MIPS emulator.
-    pub async fn step(&mut self, proof: bool) -> Result<Option<StepWitness>> {
-        // Reset witness generation parameters
+    pub async fn step(&mut self, proof: bool) -> Result<Option<StepWitness<M>>> {
         self.mem_proof_enabled = proof;
         self.last_mem_access = None;
         self.last_preimage_offset = None;
 
-        // Formulate the state witness as well as the instruction proof prior to performing the
-        // state transition.
-        let mut witness = proof
-            .then(|| {
+        // Reset witness generation parameters
+        if !proof {
+            self.inner_step().await?;
+            Ok(None)
+        } else {
+            // Formulate the state witness as well as the instruction proof prior to performing the
+            // state transition.
+            let mut witness = {
                 // Generate a merkle proof for the page containing the current instruction.
-                let instruction_proof = self.state.memory.merkle_proof(self.state.pc as Address)?;
+                let instruction_proof = self.state.memory.proof(self.state.pc as Address)?;
 
                 // Allocate the proof vector and push the instruction proof.
                 let mut proof = Vec::with_capacity(2);
                 proof.push(instruction_proof);
 
-                Ok::<_, anyhow::Error>(StepWitness {
-                    state: self.state.encode_witness()?,
-                    proof,
-                    ..Default::default()
-                })
-            })
-            .transpose()?;
+                StepWitness { state: self.state.encode_witness()?, proof, ..Default::default() }
+            };
 
-        // Perform the state transition.
-        self.inner_step().await?;
+            // Perform the state transition.
+            self.inner_step().await?;
 
-        // Update the witness with the memory access proof and preimage data, if there was a
-        // preimage read within the state transition.
-        if proof {
-            witness = witness.map(|mut wit| {
-                if let Some(mem_proof) = self.mem_proof.take() {
-                    wit.proof.push(mem_proof);
-                }
+            // Update the witness with the memory access proof and preimage data, if there was a
+            // preimage read within the state transition.
+            if let Some(mem_proof) = self.mem_proof.take() {
+                witness.proof.push(mem_proof);
+            }
 
-                if self.last_preimage_offset.is_some() {
-                    wit.preimage_key = Some(self.last_preimage_key);
-                    wit.preimage_value = Some(self.last_preimage.clone());
-                    wit.preimage_offset = self.last_preimage_offset;
-                }
-                wit
-            })
+            if self.last_preimage_offset.is_some() {
+                witness.preimage_key = Some(self.last_preimage_key);
+                witness.preimage_value = Some(self.last_preimage.clone());
+                witness.preimage_offset = self.last_preimage_offset;
+            }
+
+            Ok(Some(witness))
         }
-
-        Ok(witness)
     }
 
     /// Returns a reference the stdout buffer.
@@ -135,7 +130,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        memory::Address,
+        memory::{Address, Memory, TrieMemory},
         mips::InstrumentedState,
         state::State,
         test_utils::{ClaimTestOracle, StaticOracle, BASE_ADDR_END, END_ADDR},
@@ -164,7 +159,8 @@ mod test {
 
             let program_mem = fs::read(f.path()).unwrap();
 
-            let mut state = State { pc: 0, next_pc: 4, ..Default::default() };
+            let memory = TrieMemory::default();
+            let mut state = State { pc: 0, next_pc: 4, memory, ..Default::default() };
             state.memory.set_memory_range(0, BufReader::new(program_mem.as_slice())).unwrap();
 
             // Set the return address ($ra) to jump into when the test completes.
@@ -208,7 +204,7 @@ mod test {
     #[tokio::test]
     async fn test_hello() {
         let elf_bytes = include_bytes!("../../../../example/bin/hello.elf");
-        let mut state = load_elf(elf_bytes).unwrap();
+        let mut state = load_elf::<TrieMemory>(elf_bytes).unwrap();
         patch_go(elf_bytes, &mut state).unwrap();
         patch_stack(&mut state).unwrap();
 
@@ -244,7 +240,7 @@ mod test {
     #[tokio::test]
     async fn test_claim() {
         let elf_bytes = include_bytes!("../../../../example/bin/claim.elf");
-        let mut state = load_elf(elf_bytes).unwrap();
+        let mut state = load_elf::<TrieMemory>(elf_bytes).unwrap();
         patch_go(elf_bytes, &mut state).unwrap();
         patch_stack(&mut state).unwrap();
 

@@ -5,6 +5,7 @@ use alloy_primitives::B256;
 use anyhow::Result;
 use clap::Args;
 use howitzer_fpvm::{
+    memory::{Memory, TrieMemory},
     state::state_hash,
     utils::patch::{load_elf, patch_go, patch_stack},
 };
@@ -70,7 +71,7 @@ impl HowitzerSubcommandDispatcher for LoadElfArgs {
         let mut reader = BufReader::new(file);
         let mut elf_raw = Vec::with_capacity(file_sz as usize);
         reader.read_to_end(&mut elf_raw)?;
-        let mut state = load_elf(&elf_raw)?;
+        let mut state = load_elf::<TrieMemory>(&elf_raw)?;
         tracing::info!(target: "howitzer-cli::load-elf", "Loaded ELF file and constructed the State");
 
         for p in self.patch_kind {
@@ -81,7 +82,7 @@ impl HowitzerSubcommandDispatcher for LoadElfArgs {
             }?;
         }
 
-        state.memory.flush_page_cache();
+        state.memory.flush_page_cache()?;
 
         if let Some(ref path_str) = self.output {
             if path_str == "-" {
