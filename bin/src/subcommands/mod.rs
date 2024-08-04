@@ -1,15 +1,17 @@
 //! Subcommands for the `howitzer` binary
 
 use anyhow::Result;
+use async_trait::async_trait;
 use clap::Subcommand;
 
 mod load_elf;
 mod run;
 mod witness;
 
+#[async_trait]
 pub(crate) trait HowitzerSubcommandDispatcher {
     /// Dispatches the subcommand
-    fn dispatch(self) -> Result<()>;
+    async fn dispatch(self) -> Result<()>;
 }
 
 /// The subcommands for the `howitzer` binary
@@ -23,12 +25,13 @@ pub(crate) enum HowitzerSubcommand {
     LoadElf(load_elf::LoadElfArgs),
 }
 
+#[async_trait]
 impl HowitzerSubcommandDispatcher for HowitzerSubcommand {
-    fn dispatch(self) -> Result<()> {
+    async fn dispatch(self) -> Result<()> {
         match self {
-            HowitzerSubcommand::Run(args) => args.dispatch(),
-            HowitzerSubcommand::Witness(args) => args.dispatch(),
-            HowitzerSubcommand::LoadElf(args) => args.dispatch(),
+            HowitzerSubcommand::Run(args) => args.dispatch().await,
+            HowitzerSubcommand::Witness(args) => args.dispatch().await,
+            HowitzerSubcommand::LoadElf(args) => args.dispatch().await,
         }
     }
 }

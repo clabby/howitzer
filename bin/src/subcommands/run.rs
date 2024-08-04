@@ -2,6 +2,7 @@
 
 use super::HowitzerSubcommandDispatcher;
 use anyhow::Result;
+use async_trait::async_trait;
 use clap::Args;
 use howitzer_fpvm::memory::TrieMemory;
 use howitzer_kernel::KernelBuilder;
@@ -48,8 +49,9 @@ pub(crate) struct RunArgs {
     info_at: Option<String>,
 }
 
+#[async_trait]
 impl HowitzerSubcommandDispatcher for RunArgs {
-    fn dispatch(self) -> Result<()> {
+    async fn dispatch(self) -> Result<()> {
         let kernel = KernelBuilder::default()
             .with_preimage_server(self.preimage_server.replace('"', ""))
             .with_input(self.input)
@@ -61,6 +63,6 @@ impl HowitzerSubcommandDispatcher for RunArgs {
             .with_stop_at(self.stop_at)
             .with_info_at(self.info_at)
             .build::<TrieMemory>()?;
-        kernel.run()
+        kernel.run().await
     }
 }

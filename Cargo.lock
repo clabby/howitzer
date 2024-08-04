@@ -1174,11 +1174,13 @@ version = "0.1.0"
 dependencies = [
  "alloy-primitives",
  "anyhow",
+ "async-trait",
  "clap",
  "howitzer-fpvm",
  "howitzer-kernel",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

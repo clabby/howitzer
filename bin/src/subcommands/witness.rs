@@ -3,6 +3,7 @@
 use super::HowitzerSubcommandDispatcher;
 use alloy_primitives::B256;
 use anyhow::Result;
+use async_trait::async_trait;
 use clap::Args;
 use howitzer_fpvm::{
     memory::TrieMemory,
@@ -24,8 +25,9 @@ pub(crate) struct WitnessArgs {
     output: Option<PathBuf>,
 }
 
+#[async_trait]
 impl HowitzerSubcommandDispatcher for WitnessArgs {
-    fn dispatch(self) -> Result<()> {
+    async fn dispatch(self) -> Result<()> {
         tracing::info!(target: "howitzer-cli::witness", "Loading state JSON dump from {}", self.input.display());
 
         let state_raw = fs::read(&self.input)?;

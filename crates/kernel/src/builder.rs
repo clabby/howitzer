@@ -2,11 +2,11 @@
 
 use crate::{gz, utils::bidirectional_pipe, Kernel, ProcessPreimageOracle};
 use anyhow::{anyhow, Result};
-use howitzer_fpvm::{memory::Memory, mips::InstrumentedState, state::State};
+use howitzer_fpvm::{memory::Memory, mips::HowitzerVM, state::State};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File},
-    io::{self, BufReader, Read, Stderr, Stdout},
+    io::{BufReader, Read},
     path::PathBuf,
 };
 
@@ -36,9 +36,7 @@ pub struct KernelBuilder {
 
 impl KernelBuilder {
     /// Builds the [Kernel] struct from the information contained within the [KernelBuilder].
-    ///
-    /// TODO(clabby): Make the i/o streams + the preimage oracle configurable.
-    pub fn build<M>(self) -> Result<Kernel<M, Stdout, Stderr, ProcessPreimageOracle>>
+    pub fn build<M>(self) -> Result<Kernel<M, ProcessPreimageOracle>>
     where
         M: Memory + Serialize + Send + 'static,
         <M as Memory>::Proof: Serialize + Send + 'static,
@@ -49,39 +47,35 @@ impl KernelBuilder {
         let f = File::open(&self.input)?;
         let f_sz = f.metadata()?.len();
         let mut reader = BufReader::new(f);
-        // Give a reasonable capacity to the vector to avoid too many reallocations. The size of the
-        // file is the size of the compressed state dump, so we will still reallocate.
         let mut raw_state = Vec::with_capacity(f_sz as usize);
         reader.read_to_end(&mut raw_state)?;
         let raw_state = fs::read(&self.input)?;
         let state: State<M> = serde_json::from_slice(&gz::decompress_bytes(&raw_state)?)?;
 
-        let (hint_cl_rw, hint_oracle_rw) = bidirectional_pipe()?;
-        let (pre_cl_rw, pre_oracle_rw) = bidirectional_pipe()?;
+        let hint_channel = bidirectional_pipe()?;
+        let preimage_channel = bidirectional_pipe()?;
 
-        // TODO(clabby): Allow for the preimage server to be configurable.
         let cmd = self.preimage_server.split(' ').map(String::from).collect::<Vec<_>>();
         let (oracle, server_proc) = ProcessPreimageOracle::start(
             PathBuf::from(cmd.first().ok_or(anyhow!("Missing preimage server binary path"))?),
             &cmd[1..],
-            (hint_cl_rw, pre_cl_rw),
-            (hint_oracle_rw, pre_oracle_rw),
+            hint_channel,
+            preimage_channel,
         )?;
 
-        // TODO(clabby): Allow for the stdout / stderr to be configurable.
-        let instrumented = InstrumentedState::new(state, oracle, io::stdout(), io::stderr());
+        let vm = HowitzerVM::new(state, oracle);
 
-        Ok(Kernel::new(
-            instrumented,
+        Ok(Kernel {
+            vm,
             server_proc,
-            self.output,
-            self.proof_at,
-            self.proof_format,
-            self.snapshot_at,
-            self.snapshot_format,
-            self.stop_at,
-            self.info_at,
-        ))
+            output: self.output,
+            proof_at: self.proof_at,
+            proof_format: self.proof_format,
+            snapshot_at: self.snapshot_at,
+            snapshot_format: self.snapshot_format,
+            stop_at: self.stop_at,
+            info_at: self.info_at,
+        })
     }
 
     pub fn with_preimage_server(mut self, preimage_server: String) -> Self {

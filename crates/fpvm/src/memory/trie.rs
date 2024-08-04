@@ -132,25 +132,6 @@ where
         }
     }
 
-    /// Returns the number of leaves in the trie rooted at `self`.
-    ///
-    /// ## Takes
-    /// - `self` - The root trie node
-    /// - `cache` - The cache of trie nodes
-    ///
-    /// ## Returns
-    /// - `usize` - The number of leaves in the trie
-    pub(crate) fn leaf_count(&self) -> usize {
-        match self {
-            TrieNode::Empty => 0,
-            TrieNode::Leaf { .. } => 1,
-            TrieNode::Extension { node, .. } => node.leaf_count(),
-            TrieNode::Branch { stack, .. } => {
-                stack.iter().fold(0, |acc, node| acc + node.leaf_count())
-            }
-        }
-    }
-
     /// Generates a proof for the given K/V pair in the trie rooted at `self`.
     ///
     /// ## Takes

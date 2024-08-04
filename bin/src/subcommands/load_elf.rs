@@ -3,6 +3,7 @@
 use super::HowitzerSubcommandDispatcher;
 use alloy_primitives::B256;
 use anyhow::Result;
+use async_trait::async_trait;
 use clap::Args;
 use howitzer_fpvm::{
     memory::{Memory, TrieMemory},
@@ -63,8 +64,9 @@ impl Display for PatchKind {
     }
 }
 
+#[async_trait]
 impl HowitzerSubcommandDispatcher for LoadElfArgs {
-    fn dispatch(self) -> Result<()> {
+    async fn dispatch(self) -> Result<()> {
         tracing::info!(target: "howitzer-cli::load-elf", "Loading ELF file @ {}", self.input.display());
         let file = File::open(&self.input)?;
         let file_sz = file.metadata()?.len();

@@ -1,7 +1,7 @@
 //! This module contains the data structure for the state of the MIPS emulator.
 
-use crate::memory::Memory;
-use alloy_primitives::keccak256;
+use crate::{memory::Memory, mips::isa::DoubleWord};
+use alloy_primitives::{keccak256, B256};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -14,17 +14,16 @@ pub type StateWitness = [u8; STATE_WITNESS_SIZE];
 /// The [State] struct contains the internal model of the MIPS emulator state.
 ///
 /// The [State] by itself does not contain functionality for performing instruction steps
-/// or executing the MIPS emulator. For this, use the [InstrumentedState] struct.
+/// or executing the MIPS emulator. For this, use the [HowitzerVM] struct.
 ///
-/// [InstrumentedState]: crate::mips::InstrumentedState
+/// [HowitzerVM]: crate::mips::HowitzerVM
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct State<M: Memory> {
     /// The memory of the emulated MIPS thread context.
     pub memory: M,
     /// The preimage key for the given state.
-    #[serde(with = "crate::utils::ser::fixed_32_hex")]
-    pub preimage_key: [u8; 32],
+    pub preimage_key: B256,
     /// The preimage offset.
     pub preimage_offset: u64,
     /// The current program counter. (Special purpose register $pc)
@@ -44,7 +43,7 @@ pub struct State<M: Memory> {
     /// The current step of the MIPS emulator.
     pub step: u64,
     /// The MIPS emulator's registers.
-    pub registers: [u64; 32],
+    pub registers: [DoubleWord; 32],
     /// The last hint sent to the host.
     #[serde(with = "crate::utils::ser::vec_u8_hex")]
     pub last_hint: Vec<u8>,
@@ -58,7 +57,7 @@ impl<M: Memory> State<M> {
     pub fn encode_witness(&mut self) -> Result<StateWitness> {
         let mut witness: StateWitness = [0u8; STATE_WITNESS_SIZE];
         witness[..32].copy_from_slice(self.memory.merkleize()?.as_ref());
-        witness[32..64].copy_from_slice(self.preimage_key.as_slice());
+        witness[32..64].copy_from_slice(self.preimage_key.as_ref());
         witness[64..72].copy_from_slice(&self.preimage_offset.to_be_bytes());
         witness[72..80].copy_from_slice(&self.pc.to_be_bytes());
         witness[80..88].copy_from_slice(&self.next_pc.to_be_bytes());

@@ -1,5 +1,6 @@
 //! This module contains the types for the `howitzer` interface.
 
+use alloy_primitives::B256;
 use howitzer_fpvm::{memory::Memory, state::StateWitness};
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +21,7 @@ where
     pub state_data: StateWitness,
     pub proof_data: Vec<M::Proof>,
     pub step_input: Vec<u8>,
-    pub oracle_key: Option<Vec<u8>>,
+    pub oracle_key: Option<B256>,
     pub oracle_value: Option<Vec<u8>>,
     pub oracle_offset: Option<u64>,
     pub oracle_input: Option<Vec<u8>>,

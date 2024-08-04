@@ -26,7 +26,7 @@ impl Memory for TrieMemory {
     type Proof = Vec<Bytes>;
 
     fn page_count(&self) -> usize {
-        self.page_trie.leaf_count()
+        self.page_cache.len()
     }
 
     fn merkleize(&mut self) -> Result<B256> {
@@ -264,6 +264,7 @@ mod test {
 
         let cursor = Cursor::new(vec![0xFF; 2]);
         trie_mem.set_memory_range(0, cursor).unwrap();
+        trie_mem.flush_page_cache().unwrap();
 
         // Perform a roudntrip serialization and deserialization of the trie memory.
         let serialized = serde_json::to_string(&trie_mem).unwrap();
