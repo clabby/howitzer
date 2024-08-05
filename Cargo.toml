@@ -11,8 +11,8 @@ authors = ["clabby"]
 alloy-primitives = "0.7.7"
 
 # kona
-kona-preimage = { path = "../../optimism/kona/crates/preimage" }
-kona-common = { path = "../../optimism/kona/crates/common" }
+kona-preimage = { git = "https://github.com/ethereum-optimism/kona", rev = "e069eb4" }
+kona-common = { git = "https://github.com/ethereum-optimism/kona", rev = "e069eb4" }
 
 # ser
 serde = { version = "1.0.204", features = ["derive"] }
