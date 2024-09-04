@@ -1,11 +1,12 @@
-//! The MIPS module contains the implementation of the [InstrumentedState] and the MIPS emulator.
+//! The MIPS module contains the implementation of the [HowitzerVM].
 
-mod instrumented;
-pub use instrumented::InstrumentedState;
+mod vm;
+pub use vm::HowitzerVM;
 
+pub mod cpu;
 pub mod isa;
 pub mod linux;
-pub mod vm;
+pub mod proof;
 
 /// Defines an enum type with underlying [u32] representation on variants, and a [TryFrom]
 /// implementation automatically generated.

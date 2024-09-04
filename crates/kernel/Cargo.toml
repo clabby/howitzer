@@ -24,7 +24,8 @@ howitzer-fpvm = { path = "../fpvm" }
 tempfile = "3.10"
 async-trait = "0.1.81"
 flate2 = "1.0.28"
-command-fds = "0.2.3"
+command-fds = { version = "0.3.0", features = ["tokio"] }
+os_pipe = "1.2.1"
 
 [dev-dependencies]
 proptest = "1.4.0"

@@ -3,8 +3,10 @@
 use super::HowitzerSubcommandDispatcher;
 use alloy_primitives::B256;
 use anyhow::Result;
+use async_trait::async_trait;
 use clap::Args;
 use howitzer_fpvm::{
+    memory::{Memory, TrieMemory},
     state::state_hash,
     utils::patch::{load_elf, patch_go, patch_stack},
 };
@@ -22,16 +24,16 @@ use std::{
 #[command(author, version, about)]
 pub(crate) struct LoadElfArgs {
     /// The path to the input 32-bit big-endian MIPS ELF file.
-    #[arg(long)]
-    path: PathBuf,
+    #[arg(long, short)]
+    input: PathBuf,
 
     /// The type of patch to perform on the ELF file.
-    #[arg(long, default_values = ["go", "stack"])]
+    #[arg(long, short, default_values = ["go", "stack"])]
     patch_kind: Vec<PatchKind>,
 
     /// The output path to write the JSON state to. State will be dumped to stdout if set to `-`.
     /// Not written if not provided.
-    #[arg(long)]
+    #[arg(long, short)]
     output: Option<String>,
 }
 
@@ -62,15 +64,16 @@ impl Display for PatchKind {
     }
 }
 
+#[async_trait]
 impl HowitzerSubcommandDispatcher for LoadElfArgs {
-    fn dispatch(self) -> Result<()> {
-        tracing::info!(target: "howitzer-cli::load-elf", "Loading ELF file @ {}", self.path.display());
-        let file = File::open(&self.path)?;
+    async fn dispatch(self) -> Result<()> {
+        tracing::info!(target: "howitzer-cli::load-elf", "Loading ELF file @ {}", self.input.display());
+        let file = File::open(&self.input)?;
         let file_sz = file.metadata()?.len();
         let mut reader = BufReader::new(file);
         let mut elf_raw = Vec::with_capacity(file_sz as usize);
         reader.read_to_end(&mut elf_raw)?;
-        let mut state = load_elf(&elf_raw)?;
+        let mut state = load_elf::<TrieMemory>(&elf_raw)?;
         tracing::info!(target: "howitzer-cli::load-elf", "Loaded ELF file and constructed the State");
 
         for p in self.patch_kind {
@@ -80,6 +83,8 @@ impl HowitzerSubcommandDispatcher for LoadElfArgs {
                 PatchKind::Stack => patch_stack(&mut state),
             }?;
         }
+
+        state.memory.flush_page_cache()?;
 
         if let Some(ref path_str) = self.output {
             if path_str == "-" {

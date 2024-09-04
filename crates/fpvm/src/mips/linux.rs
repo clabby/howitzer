@@ -8,9 +8,10 @@ use super::{
     isa::{DoubleWord, Word},
 };
 use crate::{
-    memory::{page, Address, MemoryReader},
-    mips::InstrumentedState,
+    memory::{page, Address, Memory, MemoryReader},
+    mips::HowitzerVM,
 };
+use alloy_primitives::B256;
 use anyhow::Result;
 use kona_preimage::{HintRouter, PreimageFetcher};
 use std::io::{self, BufReader, Read, Write};
@@ -41,10 +42,9 @@ def_enum!(Syscall {
     Fcntl = 5070,
 });
 
-impl<O, E, P> InstrumentedState<O, E, P>
+impl<M, P> HowitzerVM<M, P>
 where
-    O: Write,
-    E: Write,
+    M: Memory,
     P: HintRouter + PreimageFetcher,
 {
     /// Handles a [Syscall] dispatch within the MIPS kernel.
@@ -52,7 +52,7 @@ where
     /// ### Returns
     /// - `Ok(())` - The syscall was successfully handled.
     /// - `Err(_)` - An error occurred while handling the syscall.
-    #[inline]
+    #[inline(always)]
     pub(crate) async fn handle_syscall(&mut self) -> Result<()> {
         let mut v0 = 0;
         let mut v1 = 0;
@@ -246,28 +246,28 @@ where
     /// ### Returns
     /// - `Ok((data, data_len))`: The preimage data and length.
     /// - `Err(_)`: An error occurred while fetching the preimage.
-    #[inline]
+    #[inline(always)]
     pub(crate) async fn read_preimage(
         &mut self,
-        key: [u8; 32],
+        key: B256,
         offset: u64,
     ) -> Result<([u8; 32], usize)> {
-        if key != self.last_preimage_key {
-            let data = self.preimage_oracle.get_preimage(key.try_into()?).await?;
-            self.last_preimage_key = key;
+        if key != self.proof_meta.last_preimage_key {
+            let data = self.preimage_oracle.get_preimage((*key).try_into()?).await?;
+            self.proof_meta.last_preimage_key = *key;
 
             // Add the length prefix to the preimage
             // Resizes the `last_preimage` vec in-place to reduce reallocations.
-            self.last_preimage.resize(8 + data.len(), 0);
-            self.last_preimage[0..8].copy_from_slice(&data.len().to_be_bytes());
-            self.last_preimage[8..].copy_from_slice(&data);
+            self.proof_meta.last_preimage.resize(8 + data.len(), 0);
+            self.proof_meta.last_preimage[0..8].copy_from_slice(&data.len().to_be_bytes());
+            self.proof_meta.last_preimage[8..].copy_from_slice(&data);
         }
 
-        self.last_preimage_offset = Some(offset);
+        self.proof_meta.last_preimage_offset = Some(offset);
 
         let mut data = [0u8; 32];
-        let data_len =
-            BufReader::new(&self.last_preimage[offset as usize..]).read(data.as_mut_slice())?;
+        let data_len = BufReader::new(&self.proof_meta.last_preimage[offset as usize..])
+            .read(data.as_mut_slice())?;
         Ok((data, data_len))
     }
 }

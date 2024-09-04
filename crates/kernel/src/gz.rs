@@ -13,6 +13,7 @@ pub fn compress_bytes(bytes: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Decompresses a byte slice using gzip.
+#[inline(always)]
 pub fn decompress_bytes(compressed_bytes: &[u8]) -> Result<Vec<u8>> {
     let mut decoder = GzDecoder::new(compressed_bytes);
 

@@ -1,12 +1,13 @@
 use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 use howitzer_fpvm::{
-    mips::InstrumentedState,
+    memory::TrieMemory,
+    mips::HowitzerVM,
     test_utils::{ClaimTestOracle, StaticOracle},
     utils::patch::{load_elf, patch_go, patch_stack},
 };
 use kona_preimage::{HintRouter, PreimageFetcher};
 use pprof::criterion::{Output, PProfProfiler};
-use std::{io::BufWriter, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[inline(always)]
@@ -16,13 +17,11 @@ fn bench_exec(
     compute_witness: bool,
     b: &mut Bencher,
 ) {
-    let mut state = load_elf(elf_bytes).unwrap();
+    let mut state = load_elf::<TrieMemory>(elf_bytes).unwrap();
     patch_go(elf_bytes, &mut state).unwrap();
     patch_stack(&mut state).unwrap();
 
-    let out = BufWriter::new(Vec::default());
-    let err = BufWriter::new(Vec::default());
-    let ins = Arc::new(Mutex::new(InstrumentedState::new(state, oracle, out, err)));
+    let ins = Arc::new(Mutex::new(HowitzerVM::new(state, oracle)));
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     b.to_async(rt).iter(|| async {

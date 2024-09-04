@@ -2,7 +2,9 @@
 
 use super::HowitzerSubcommandDispatcher;
 use anyhow::Result;
+use async_trait::async_trait;
 use clap::Args;
+use howitzer_fpvm::memory::TrieMemory;
 use howitzer_kernel::KernelBuilder;
 
 /// Command line arguments for `howitzer run`
@@ -14,11 +16,11 @@ pub(crate) struct RunArgs {
     preimage_server: String,
 
     /// The path to the input JSON state.
-    #[arg(long)]
+    #[arg(long, default_value = "state.json.gz")]
     input: String,
 
     /// The path to the output JSON state.
-    #[arg(long)]
+    #[arg(long, default_value = "out.json.gz")]
     output: Option<String>,
 
     /// The step to generate an output proof at.
@@ -47,8 +49,9 @@ pub(crate) struct RunArgs {
     info_at: Option<String>,
 }
 
+#[async_trait]
 impl HowitzerSubcommandDispatcher for RunArgs {
-    fn dispatch(self) -> Result<()> {
+    async fn dispatch(self) -> Result<()> {
         let kernel = KernelBuilder::default()
             .with_preimage_server(self.preimage_server.replace('"', ""))
             .with_input(self.input)
@@ -59,7 +62,7 @@ impl HowitzerSubcommandDispatcher for RunArgs {
             .with_snapshot_format(self.snapshot_format)
             .with_stop_at(self.stop_at)
             .with_info_at(self.info_at)
-            .build()?;
-        kernel.run()
+            .build::<TrieMemory>()?;
+        kernel.run().await
     }
 }

@@ -1,5 +1,7 @@
 //! This module contains the various witness types.
 
+use crate::memory::Memory;
+
 use super::{StateWitness, STATE_WITNESS_SIZE};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_sol_types::{sol, SolCall};
@@ -9,11 +11,11 @@ use kona_preimage::PreimageKeyType;
 /// the encoded [StateWitness], the proof of memory access, and the preimage key, value, and
 /// offset.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct StepWitness {
+pub struct StepWitness<M: Memory> {
     /// The encoded state witness
     pub state: StateWitness,
     /// The proof of memory access
-    pub proof: Vec<Vec<Bytes>>,
+    pub proof: Vec<M::Proof>,
     /// The preimage key
     pub preimage_key: Option<[u8; 32]>,
     /// The preimage value
@@ -22,7 +24,7 @@ pub struct StepWitness {
     pub preimage_offset: Option<u64>,
 }
 
-impl Default for StepWitness {
+impl<M: Memory> Default for StepWitness<M> {
     fn default() -> Self {
         Self {
             state: [0u8; STATE_WITNESS_SIZE],
@@ -45,7 +47,7 @@ sol! {
     function step(bytes,bytes,bytes32) external returns (bytes32);
 }
 
-impl StepWitness {
+impl<M: Memory> StepWitness<M> {
     /// Returns `true` if the step witness has a preimage.
     pub fn has_preimage(&self) -> bool {
         self.preimage_key.is_some()

@@ -56,7 +56,7 @@ pub(crate) const EMPTY_ROOT_HASH: B256 =
 /// to behave correctly if confronted with keys of varying lengths. Namely, this is because it does
 /// not support the `value` field in branch nodes.
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
-pub enum TrieNode<V>
+pub(crate) enum TrieNode<V>
 where
     V: Clone + Eq + PartialEq + Encodable + Decodable,
 {
@@ -100,7 +100,7 @@ where
 {
     /// Returns the hash of the RLP encoded [TrieNode]. Updates the node's cached hash if it is
     /// currently [None].
-    pub fn root(&mut self) -> B256 {
+    pub(crate) fn root(&mut self) -> B256 {
         // Check if the node has a cached hash.
         if let Some(cached_hash) = self.cached_hash() {
             return cached_hash;
@@ -123,31 +123,12 @@ where
     }
 
     /// Returns the cached hash of the [TrieNode], or [None] if it is not cached.
-    pub fn cached_hash(&self) -> Option<B256> {
+    pub(crate) fn cached_hash(&self) -> Option<B256> {
         match self {
             TrieNode::Empty => Some(EMPTY_ROOT_HASH),
             TrieNode::Leaf { cached_hash, .. } |
             TrieNode::Extension { cached_hash, .. } |
             TrieNode::Branch { cached_hash, .. } => *cached_hash,
-        }
-    }
-
-    /// Returns the number of leaves in the trie rooted at `self`.
-    ///
-    /// ## Takes
-    /// - `self` - The root trie node
-    /// - `cache` - The cache of trie nodes
-    ///
-    /// ## Returns
-    /// - `usize` - The number of leaves in the trie
-    pub fn leaf_count(&self) -> usize {
-        match self {
-            TrieNode::Empty => 0,
-            TrieNode::Leaf { .. } => 1,
-            TrieNode::Extension { node, .. } => node.leaf_count(),
-            TrieNode::Branch { stack, .. } => {
-                stack.iter().fold(0, |acc, node| acc + node.leaf_count())
-            }
         }
     }
 
@@ -159,7 +140,7 @@ where
     /// ## Returns
     /// - `Ok(Vec<Bytes>)` - The proof for the given K/V pair
     /// - `Err(_)` - Proof generation error
-    pub fn proof(&mut self, path: &Nibbles) -> Result<Vec<Bytes>> {
+    pub(crate) fn proof(&mut self, path: &Nibbles) -> Result<Vec<Bytes>> {
         let mut proof = Vec::with_capacity(8);
 
         match self {
@@ -219,7 +200,11 @@ where
     /// ## Returns
     /// - `Err(_)` - Could not retrieve the node with the given key from the trie.
     /// - `Ok((_, _))` - The key and value of the node
-    pub fn open<'a>(&'a mut self, path: &Nibbles, invalidate: bool) -> Result<Option<&'a mut V>> {
+    pub(crate) fn open<'a>(
+        &'a mut self,
+        path: &Nibbles,
+        invalidate: bool,
+    ) -> Result<Option<&'a mut V>> {
         match self {
             TrieNode::Branch { ref mut stack, cached_hash } => {
                 if invalidate {
@@ -265,7 +250,7 @@ where
     /// ## Returns
     /// - `Err(_)` - Could not insert the node at the given path in the trie.
     /// - `Ok(())` - The node was successfully inserted at the given path.
-    pub fn insert(&mut self, path: &Nibbles, value: V) -> Result<()> {
+    pub(crate) fn insert(&mut self, path: &Nibbles, value: V) -> Result<()> {
         match self {
             TrieNode::Empty => {
                 // If the trie node is null, insert the leaf node at the current path.
